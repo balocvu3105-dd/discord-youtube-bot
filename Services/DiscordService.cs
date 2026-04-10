@@ -38,17 +38,28 @@ public class DiscordService : IAsyncDisposable
         _logger.LogInformation("Bot Discord đã kết nối và sẵn sàng!");
     }
 
+    // 🔥 GỬI CHO MỌI SERVER
     public async Task SendVideoNotificationAsync(VideoInfo video)
     {
-        if (_client.GetChannel(_config.ChannelId) is not IMessageChannel channel)
-        {
-            _logger.LogError("Không tìm thấy kênh Discord với ID {ChannelId}.", _config.ChannelId);
-            return;
-        }
-
         var embed = BuildEmbed(video);
-        await channel.SendMessageAsync(embed: embed);
-        _logger.LogInformation("Đã gửi thông báo Discord cho video: {Title}", video.Title);
+
+        foreach (var guild in _client.Guilds)
+        {
+            var channel = guild.TextChannels
+                .FirstOrDefault(c => c.Name.Equals(_config.ChannelName, StringComparison.OrdinalIgnoreCase));
+
+            if (channel == null)
+            {
+                _logger.LogWarning("Server {Guild} không có channel {ChannelName}",
+                    guild.Name, _config.ChannelName);
+                continue;
+            }
+
+            await channel.SendMessageAsync(embed: embed);
+
+            _logger.LogInformation("Đã gửi thông báo tới {Guild} / #{Channel}",
+                guild.Name, channel.Name);
+        }
     }
 
     private Embed BuildEmbed(VideoInfo video)
@@ -67,10 +78,7 @@ public class DiscordService : IAsyncDisposable
             .WithTimestamp(DateTimeOffset.UtcNow)
             .WithFooter("YouTube Notifier Bot");
 
-        if (video.IsLivestream)
-            builder.AddField("🔴 Link Stream", video.Url);
-        else
-            builder.AddField("▶️ Xem Ngay", video.Url);
+        builder.AddField(video.IsLivestream ? "🔴 Link Stream" : "▶️ Xem Ngay", video.Url);
 
         return builder.Build();
     }
