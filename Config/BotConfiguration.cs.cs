@@ -4,7 +4,7 @@ public class BotConfiguration
 {
     public const string SectionName = "BotConfiguration";
     public string BotToken { get; set; } = string.Empty;
-    public List<ulong> ChannelIds { get; set; } = new();
+    public string ChannelName { get; set; } = "youtube-noti";
     public string YouTubeApiKey { get; set; } = string.Empty;
     public string YouTubeChannelId { get; set; } = string.Empty;
     public int CheckIntervalSeconds { get; set; } = 60;
