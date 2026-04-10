@@ -1,0 +1,20 @@
+# Visual Studio
+.vs/
+bin/
+obj/
+
+# User files
+*.user
+*.suo
+*.userprefs
+
+# Build results
+Debug/
+Release/
+
+# Rider
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
