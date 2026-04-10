@@ -3,9 +3,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using YouTubeDiscordBot.aConfig;
-using YouTubeDiscordBot.Services;
 using Microsoft.AspNetCore.Http;
+using YouTubeDiscordBot.Config;
+using YouTubeDiscordBot.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,7 +31,7 @@ builder.Services.AddHostedService<YouTubeCheckerBackgroundService>();
 
 var app = builder.Build();
 
-// ✅ Health check cho Render + UptimeRobot
+// Health check cho Render + UptimeRobot
 app.MapMethods("/", new[] { "GET", "HEAD" }, () => Results.Ok("OK"));
 
 // Start bot khi app start
