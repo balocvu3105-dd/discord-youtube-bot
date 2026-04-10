@@ -1,61 +1,51 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using YouTubeDiscordBot.Config;
 using YouTubeDiscordBot.Services;
 
-var host = Host.CreateDefaultBuilder(args)
+var builder = WebApplication.CreateBuilder(args);
 
-    .ConfigureAppConfiguration((context, config) =>
-    {
-        config
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-            .AddEnvironmentVariables();
-    })
+// CONFIG
+builder.Configuration
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddEnvironmentVariables();
 
-    .ConfigureLogging(logging =>
-    {
-        logging.ClearProviders();
-        logging.AddConsole();
-        logging.SetMinimumLevel(LogLevel.Debug);
-    })
+// LOG
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
-    .ConfigureServices((context, services) =>
-    {
-        services.Configure<BotConfiguration>(
-            context.Configuration.GetSection(BotConfiguration.SectionName));
+// SERVICES
+builder.Services.Configure<BotConfiguration>(
+    builder.Configuration.GetSection(BotConfiguration.SectionName));
 
-        services.AddSingleton<DiscordService>();
-        services.AddSingleton<YouTubeService>();
-        services.AddSingleton<PersistenceService>();
+builder.Services.AddSingleton<DiscordService>();
+builder.Services.AddSingleton<YouTubeService>();
+builder.Services.AddSingleton<PersistenceService>();
+builder.Services.AddHostedService<YouTubeCheckerBackgroundService>();
 
-        services.AddHostedService<YouTubeCheckerBackgroundService>();
-    })
-    .Build();
+var app = builder.Build();
 
-var discordService = host.Services.GetRequiredService<DiscordService>();
-var logger = host.Services.GetRequiredService<ILogger<Program>>();
+// ✅ Web endpoint cho Render biết app còn sống
+app.MapGet("/", () => "YouTube Discord Bot is running");
+
+// Start bot khi app start
+var discordService = app.Services.GetRequiredService<DiscordService>();
+var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
 try
 {
-    logger.LogInformation("========================================");
-    logger.LogInformation("  YouTube Discord Notification Bot");
-    logger.LogInformation("========================================");
-
+    logger.LogInformation("Bot starting...");
     await discordService.ConnectAsync();
-
-    logger.LogInformation("Đang khởi động các background service...");
-
-    await host.RunAsync();
 }
 catch (Exception ex)
 {
-    logger.LogCritical(ex, "Bot bị crash khi khởi động!");
+    logger.LogCritical(ex, "Bot crash khi start!");
 }
-finally
-{
-    await discordService.DisposeAsync();
-    logger.LogInformation("Bot đã tắt. Tạm biệt!");
-}
+
+// Run web + background services
+await app.RunAsync();
