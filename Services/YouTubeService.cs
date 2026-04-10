@@ -7,13 +7,15 @@ using YouTubeDiscordBot.Models;
 
 namespace YouTubeDiscordBot.Services;
 
-public class YouTubeService
+// Đổi tên thành YouTubeApiService để dứt điểm lỗi CS0101
+public class YouTubeApiService
 {
+    // Chỉ định rõ namespace của Google để không bị nhầm lẫn với class hiện tại
     private readonly Google.Apis.YouTube.v3.YouTubeService _ytClient;
     private readonly BotConfiguration _config;
-    private readonly ILogger<YouTubeService> _logger;
+    private readonly ILogger<YouTubeApiService> _logger;
 
-    public YouTubeService(IOptions<BotConfiguration> config, ILogger<YouTubeService> logger)
+    public YouTubeApiService(IOptions<BotConfiguration> config, ILogger<YouTubeApiService> logger)
     {
         _config = config.Value;
         _logger = logger;
@@ -21,7 +23,7 @@ public class YouTubeService
         _ytClient = new Google.Apis.YouTube.v3.YouTubeService(
             new BaseClientService.Initializer
             {
-                ApiKey = _config.YouTubeApiKey,
+                ApiKey = _config.YoutubeApiKey,
                 ApplicationName = "YouTubeDiscordBot"
             });
     }
@@ -30,49 +32,42 @@ public class YouTubeService
     {
         try
         {
-            var searchRequest = _ytClient.Search.List("snippet");
-            searchRequest.ChannelId = _config.YouTubeChannelId;
-            searchRequest.Order = SearchResource.ListRequest.OrderEnum.Date;
-            searchRequest.MaxResults = 1;
-            searchRequest.Type = "video";
+            _logger.LogDebug("Đang quét video mới nhất từ YouTube...");
 
-            var searchResponse = await searchRequest.ExecuteAsync();
+            // Sử dụng Playlist Uploads thay vì Search để tiết kiệm Quota (Chi phí API)
+            // Search tốn 100 units, PlaylistItems chỉ tốn 1 unit.
+            string uploadsPlaylistId = "UU" + _config.YoutubeChannelId.Substring(2);
 
-            if (searchResponse.Items == null || searchResponse.Items.Count == 0)
+            var playlistRequest = _ytClient.PlaylistItems.List("snippet");
+            playlistRequest.PlaylistId = uploadsPlaylistId;
+            playlistRequest.MaxResults = 1;
+
+            var response = await playlistRequest.ExecuteAsync();
+
+            if (response.Items == null || response.Items.Count == 0)
             {
-                _logger.LogWarning("Không tìm thấy video nào cho kênh: {ChannelId}", _config.YouTubeChannelId);
+                _logger.LogWarning("Không tìm thấy video nào cho kênh: {ChannelId}", _config.YoutubeChannelId);
                 return null;
             }
 
-            var videoId = searchResponse.Items[0].Id.VideoId;
-
-            var videoRequest = _ytClient.Videos.List("snippet,liveStreamingDetails");
-            videoRequest.Id = videoId;
-
-            var videoResponse = await videoRequest.ExecuteAsync();
-
-            if (videoResponse.Items == null || videoResponse.Items.Count == 0)
-            {
-                _logger.LogWarning("Không lấy được chi tiết video ID: {VideoId}", videoId);
-                return null;
-            }
-
-            var snippet = videoResponse.Items[0].Snippet;
+            var item = response.Items[0];
+            var snippet = item.Snippet;
 
             return new VideoInfo
             {
-                VideoId = videoId,
+                VideoId = snippet.ResourceId.VideoId,
                 Title = snippet.Title,
-                ChannelName = snippet.ChannelTitle,
+                // Thumbnail ưu tiên bản High
                 ThumbnailUrl = snippet.Thumbnails?.High?.Url
-                                       ?? snippet.Thumbnails?.Medium?.Url
-                                       ?? string.Empty,
-                LiveBroadcastContent = snippet.LiveBroadcastContent ?? "none"
+                               ?? snippet.Thumbnails?.Medium?.Url
+                               ?? string.Empty,
+                // Link video chuẩn
+                Url = $"https://www.youtube.com/watch?v={snippet.ResourceId.VideoId}"
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Lỗi khi gọi YouTube API");
+            _logger.LogError(ex, "Lỗi nghiêm trọng khi gọi YouTube API");
             return null;
         }
     }

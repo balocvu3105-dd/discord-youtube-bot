@@ -14,7 +14,8 @@ public class PersistenceService
 
     public PersistenceService(IOptions<BotConfiguration> config, ILogger<PersistenceService> logger)
     {
-        _stateFilePath = config.Value.StateFilePath;
+        // Đảm bảo đường dẫn không bị null
+        _stateFilePath = config.Value.StateFilePath ?? "last_video_state.json";
         _logger = logger;
     }
 
@@ -24,21 +25,25 @@ public class PersistenceService
         {
             if (!File.Exists(_stateFilePath))
             {
-                _logger.LogInformation("Chưa có file state. Bắt đầu mới.");
+                _logger.LogInformation("State file not found. Initializing new state.");
                 return new BotState();
             }
 
             var json = await File.ReadAllTextAsync(_stateFilePath);
+
+            // Kiểm tra nếu file rỗng
+            if (string.IsNullOrWhiteSpace(json)) return new BotState();
+
             var state = JsonSerializer.Deserialize<BotState>(json);
             if (state != null)
             {
-                _logger.LogInformation("Đã tải state. ID video cuối: '{LastVideoId}'", state.LastVideoId);
+                _logger.LogInformation("State loaded. Last Video ID: '{LastVideoId}'", state.LastVideoId);
                 return state;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Lỗi khi tải state. Bắt đầu mới.");
+            _logger.LogError(ex, "Failed to load state. Starting fresh.");
         }
         return new BotState();
     }
@@ -47,14 +52,23 @@ public class PersistenceService
     {
         try
         {
+            // Đảm bảo thư mục chứa file tồn tại (Tránh lỗi DirectoryNotFoundException)
+            var directory = Path.GetDirectoryName(_stateFilePath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
             state.LastCheckedUtc = DateTime.UtcNow;
             var json = JsonSerializer.Serialize(state, JsonOptions);
+
+            // Sử dụng WriteAllTextAsync để ghi đè file cũ bằng ID video mới nhất
             await File.WriteAllTextAsync(_stateFilePath, json);
-            _logger.LogDebug("Đã lưu state. ID video cuối: '{LastVideoId}'", state.LastVideoId);
+            _logger.LogInformation("State saved successfully. Last Video ID: '{LastVideoId}'", state.LastVideoId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Lỗi khi lưu state.");
+            _logger.LogError(ex, "Failed to save state to '{Path}'", _stateFilePath);
         }
     }
 }

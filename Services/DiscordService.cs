@@ -32,7 +32,7 @@ public class DiscordService : IAsyncDisposable
     public async Task ConnectAsync()
     {
         _logger.LogInformation("Đang kết nối vào Discord...");
-        await _client.LoginAsync(TokenType.Bot, _config.BotToken);
+        await _client.LoginAsync(TokenType.Bot, _config.DiscordToken);
         await _client.StartAsync();
         await _readyTaskSource.Task;
         _logger.LogInformation("Bot Discord đã kết nối và sẵn sàng!");
