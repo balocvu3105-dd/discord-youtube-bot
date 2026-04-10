@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using YouTubeDiscordBot.Config;
+using YouTubeDiscordBot.aConfig;
 using YouTubeDiscordBot.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -30,8 +30,8 @@ builder.Services.AddHostedService<YouTubeCheckerBackgroundService>();
 
 var app = builder.Build();
 
-// ✅ Web endpoint cho Render biết app còn sống
-app.MapGet("/", () => "YouTube Discord Bot is running");
+// ✅ Health check cho Render + UptimeRobot
+app.MapMethods("/", new[] { "GET", "HEAD" }, () => Results.Ok("OK"));
 
 // Start bot khi app start
 var discordService = app.Services.GetRequiredService<DiscordService>();
@@ -47,5 +47,4 @@ catch (Exception ex)
     logger.LogCritical(ex, "Bot crash khi start!");
 }
 
-// Run web + background services
 await app.RunAsync();
