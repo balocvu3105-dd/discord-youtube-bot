@@ -2,15 +2,14 @@
 using Google.Apis.YouTube.v3;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Xml.Linq;
 using YouTubeDiscordBot.Config;
 using YouTubeDiscordBot.Models;
 
 namespace YouTubeDiscordBot.Services;
 
-// Đổi tên thành YouTubeApiService để dứt điểm lỗi CS0101
 public class YouTubeApiService
 {
-    // Chỉ định rõ namespace của Google để không bị nhầm lẫn với class hiện tại
     private readonly Google.Apis.YouTube.v3.YouTubeService _ytClient;
     private readonly BotConfiguration _config;
     private readonly ILogger<YouTubeApiService> _logger;
@@ -28,46 +27,62 @@ public class YouTubeApiService
             });
     }
 
-    public async Task<VideoInfo?> GetLatestVideoAsync()
+    // 🔥 RSS: detect nhanh video ID
+    public async Task<List<string>> GetLatestVideoIdsFromRssAsync()
     {
         try
         {
-            _logger.LogDebug("Đang quét video mới nhất từ YouTube...");
+            var url = $"https://www.youtube.com/feeds/videos.xml?channel_id={_config.YoutubeChannelId}";
 
-            // Sử dụng Playlist Uploads thay vì Search để tiết kiệm Quota (Chi phí API)
-            // Search tốn 100 units, PlaylistItems chỉ tốn 1 unit.
-            string uploadsPlaylistId = "UU" + _config.YoutubeChannelId.Substring(2);
+            using var http = new HttpClient();
+            var xml = await http.GetStringAsync(url);
 
-            var playlistRequest = _ytClient.PlaylistItems.List("snippet");
-            playlistRequest.PlaylistId = uploadsPlaylistId;
-            playlistRequest.MaxResults = 1;
+            var doc = XDocument.Parse(xml);
 
-            var response = await playlistRequest.ExecuteAsync();
+            var ids = doc.Descendants()
+                .Where(x => x.Name.LocalName == "videoId")
+                .Select(x => x.Value)
+                .Take(3)
+                .ToList();
+
+            return ids;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Lỗi RSS");
+            return new List<string>();
+        }
+    }
+
+    // 🔥 API: lấy detail + live status
+    public async Task<VideoInfo?> GetVideoByIdAsync(string videoId)
+    {
+        try
+        {
+            var request = _ytClient.Videos.List("snippet");
+            request.Id = videoId;
+
+            var response = await request.ExecuteAsync();
 
             if (response.Items == null || response.Items.Count == 0)
-            {
-                _logger.LogWarning("Không tìm thấy video nào cho kênh: {ChannelId}", _config.YoutubeChannelId);
                 return null;
-            }
 
-            var item = response.Items[0];
-            var snippet = item.Snippet;
+            var v = response.Items[0];
+            var s = v.Snippet;
 
             return new VideoInfo
             {
-                VideoId = snippet.ResourceId.VideoId,
-                Title = snippet.Title,
-                // Thumbnail ưu tiên bản High
-                ThumbnailUrl = snippet.Thumbnails?.High?.Url
-                               ?? snippet.Thumbnails?.Medium?.Url
-                               ?? string.Empty,
-                // Link video chuẩn
-                Url = $"https://www.youtube.com/watch?v={snippet.ResourceId.VideoId}"
+                VideoId = v.Id,
+                Title = s.Title,
+                ThumbnailUrl = s.Thumbnails?.High?.Url ?? "",
+                Url = $"https://www.youtube.com/watch?v={v.Id}",
+                ChannelName = s.ChannelTitle,
+                LiveBroadcastContent = s.LiveBroadcastContent
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Lỗi nghiêm trọng khi gọi YouTube API");
+            _logger.LogError(ex, "Lỗi khi gọi Videos API");
             return null;
         }
     }

@@ -32,16 +32,21 @@ public class DiscordService : IAsyncDisposable
     public async Task ConnectAsync()
     {
         _logger.LogInformation("Đang kết nối vào Discord...");
+
         await _client.LoginAsync(TokenType.Bot, _config.DiscordToken);
         await _client.StartAsync();
+
         await _readyTaskSource.Task;
+
         _logger.LogInformation("Bot Discord đã kết nối và sẵn sàng!");
     }
 
-    // 🔥 GỬI CHO MỌI SERVER
+    // 🔥 GỬI CHO MỌI SERVER (PARALLEL + SAFE)
     public async Task SendVideoNotificationAsync(VideoInfo video)
     {
         var embed = BuildEmbed(video);
+
+        var tasks = new List<Task>();
 
         foreach (var guild in _client.Guilds)
         {
@@ -55,16 +60,33 @@ public class DiscordService : IAsyncDisposable
                 continue;
             }
 
+            tasks.Add(SendSafeAsync(channel, embed, guild.Name, channel.Name));
+        }
+
+        await Task.WhenAll(tasks);
+    }
+
+    // 🔒 SAFE SEND (KHÔNG LÀM CHẾT TOÀN BỘ BATCH)
+    private async Task SendSafeAsync(ISocketMessageChannel channel, Embed embed, string guildName, string channelName)
+    {
+        try
+        {
             await channel.SendMessageAsync(embed: embed);
 
             _logger.LogInformation("Đã gửi thông báo tới {Guild} / #{Channel}",
-                guild.Name, channel.Name);
+                guildName, channelName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Lỗi gửi Discord tới {Guild} / #{Channel}",
+                guildName, channelName);
         }
     }
 
     private Embed BuildEmbed(VideoInfo video)
     {
         var color = video.IsLivestream ? Color.Red : Color.Blue;
+
         string headerText = video.IsLivestream
             ? $"🔴 **{video.ChannelName}** đang LIVE!"
             : $"📹 **{video.ChannelName}** vừa đăng video mới!";
@@ -78,7 +100,10 @@ public class DiscordService : IAsyncDisposable
             .WithTimestamp(DateTimeOffset.UtcNow)
             .WithFooter("YouTube Notifier Bot");
 
-        builder.AddField(video.IsLivestream ? "🔴 Link Stream" : "▶️ Xem Ngay", video.Url);
+        builder.AddField(
+            video.IsLivestream ? "🔴 Link Stream" : "▶️ Xem Ngay",
+            video.Url
+        );
 
         return builder.Build();
     }
@@ -95,7 +120,9 @@ public class DiscordService : IAsyncDisposable
             LogSeverity.Debug => LogLevel.Trace,
             _ => LogLevel.Information
         };
+
         _logger.Log(level, msg.Exception, "[Discord] {Message}", msg.Message);
+
         return Task.CompletedTask;
     }
 

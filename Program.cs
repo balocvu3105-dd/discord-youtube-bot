@@ -30,6 +30,7 @@ builder.Services.AddSingleton<PersistenceService>();
 
 // Đăng ký Worker chạy ngầm
 builder.Services.AddHostedService<YouTubeCheckerBackgroundService>();
+builder.Services.AddSingleton<LiveStateService>();
 
 var app = builder.Build();
 

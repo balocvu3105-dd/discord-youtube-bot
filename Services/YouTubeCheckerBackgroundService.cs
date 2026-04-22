@@ -11,38 +11,46 @@ public class YouTubeCheckerBackgroundService : BackgroundService
     private readonly YouTubeApiService _youtubeApi;
     private readonly DiscordService _discordService;
     private readonly PersistenceService _persistence;
+    private readonly LiveStateService _liveStateService;
     private readonly BotConfiguration _config;
     private readonly ILogger<YouTubeCheckerBackgroundService> _logger;
 
-    // Biến tạm để giữ ID video mới nhất trong bộ nhớ
     private string _lastKnownVideoId = string.Empty;
+
+    // 🔥 persist state
+    private Dictionary<string, string> _liveStateCache = new();
+
+    // 🔥 anti flicker
+    private readonly Dictionary<string, DateTime> _liveCooldown = new();
 
     public YouTubeCheckerBackgroundService(
         YouTubeApiService youtubeApi,
         DiscordService discordService,
         PersistenceService persistence,
+        LiveStateService liveStateService,
         IOptions<BotConfiguration> config,
         ILogger<YouTubeCheckerBackgroundService> logger)
     {
         _youtubeApi = youtubeApi;
         _discordService = discordService;
         _persistence = persistence;
+        _liveStateService = liveStateService;
         _config = config.Value;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("🚀 YouTube Checker Background Service đang khởi động...");
+        _logger.LogInformation("🚀 Service start");
 
-        // 1. Nạp trạng thái từ file JSON khi bot vừa bật lên
-        var savedState = await _persistence.LoadStateAsync();
-        _lastKnownVideoId = savedState.LastVideoId ?? string.Empty;
+        var state = await _persistence.LoadStateAsync();
+        _lastKnownVideoId = state.LastVideoId ?? "";
 
-        _logger.LogInformation("Lịch sử video cuối cùng: {Id}",
-            string.IsNullOrEmpty(_lastKnownVideoId) ? "Trống" : _lastKnownVideoId);
+        // 🔥 load state từ file
+        _liveStateCache = await _liveStateService.LoadAsync();
 
-        // 2. Vòng lặp chính
+        _logger.LogInformation("Loaded live state: {Count} items", _liveStateCache.Count);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -51,60 +59,106 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Lỗi xảy ra trong quá trình kiểm tra video.");
+                _logger.LogError(ex, "Lỗi loop chính");
             }
 
-            // Nghỉ một khoảng thời gian trước khi check tiếp (lấy từ config)
-            int delaySeconds = _config.CheckIntervalSeconds > 0 ? _config.CheckIntervalSeconds : 600;
-            await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken);
-        }
+            int delay = _config.CheckIntervalSeconds;
+            if (delay < 15) delay = 15;
 
-        _logger.LogInformation("Stopping YouTube Checker Service...");
+            await Task.Delay(TimeSpan.FromSeconds(delay), stoppingToken);
+        }
     }
 
     private async Task CheckForNewVideoAsync()
     {
-        _logger.LogDebug("--- Đang quét YouTube tại {Time} ---", DateTime.Now);
+        var rssIds = await _youtubeApi.GetLatestVideoIdsFromRssAsync();
 
-        VideoInfo? latestVideo = await _youtubeApi.GetLatestVideoAsync();
-
-        if (latestVideo == null || string.IsNullOrEmpty(latestVideo.VideoId))
-        {
+        if (rssIds == null || rssIds.Count == 0)
             return;
-        }
 
-        // TRƯỜNG HỢP 1: Lần đầu tiên chạy bot (Chưa có lịch sử)
+        // 🔒 INIT SAFE
         if (string.IsNullOrEmpty(_lastKnownVideoId))
         {
-            _logger.LogInformation("Phát hiện video đầu tiên: {VideoId}. Đang lưu trạng thái...", latestVideo.VideoId);
+            _lastKnownVideoId = rssIds[0];
 
-            // Bạn có thể chọn gửi thông báo ngay hoặc chỉ lưu lại để chờ video tiếp theo
-            await _discordService.SendVideoNotificationAsync(latestVideo);
+            await _persistence.SaveStateAsync(new BotState
+            {
+                LastVideoId = _lastKnownVideoId
+            });
 
-            _lastKnownVideoId = latestVideo.VideoId;
-            await _persistence.SaveStateAsync(new BotState { LastVideoId = _lastKnownVideoId });
+            _logger.LogInformation("Init RSS - không gửi");
             return;
         }
 
-        // TRƯỜNG HỢP 2: Video trùng khớp (Không có gì mới)
-        if (latestVideo.VideoId == _lastKnownVideoId)
+        var newIds = new List<string>();
+
+        foreach (var id in rssIds)
         {
-            _logger.LogDebug("Không có video mới.");
-            return;
+            if (id == _lastKnownVideoId)
+                break;
+
+            newIds.Add(id);
         }
 
-        // TRƯỜNG HỢP 3: CÓ VIDEO MỚI THỰC SỰ
-        _logger.LogInformation("🎉 VIDEO MỚI: {Title}", latestVideo.Title);
+        if (newIds.Count == 0)
+            return;
 
-        // 1. Gửi thông báo Discord
-        await _discordService.SendVideoNotificationAsync(latestVideo);
+        newIds.Reverse();
 
-        // 2. Cập nhật biến tạm
-        _lastKnownVideoId = latestVideo.VideoId;
+        foreach (var id in newIds)
+        {
+            var video = await _youtubeApi.GetVideoByIdAsync(id);
 
-        // 3. Ghi đè vào file JSON ngay lập tức để không bị đăng trùng nếu bot restart
-        await _persistence.SaveStateAsync(new BotState { LastVideoId = _lastKnownVideoId });
+            if (video == null) continue;
 
-        _logger.LogInformation("Đã cập nhật trạng thái mới nhất cho video: {Id}", _lastKnownVideoId);
+            var currentState = video.LiveBroadcastContent;
+
+            _liveStateCache.TryGetValue(video.VideoId, out var previousState);
+
+            _logger.LogInformation(
+                "Video: {Title} | Prev: {Prev} -> Now: {Now}",
+                video.Title,
+                previousState ?? "null",
+                currentState
+            );
+
+            // 🚫 lần đầu thấy → chỉ lưu
+            if (previousState == null)
+            {
+                _liveStateCache[video.VideoId] = currentState;
+                continue;
+            }
+
+            // 🔴 chỉ notify khi LIVE START + anti flicker
+            if (currentState == "live" && previousState != "live")
+            {
+                if (_liveCooldown.TryGetValue(video.VideoId, out var lastSent))
+                {
+                    if ((DateTime.UtcNow - lastSent).TotalMinutes < 10)
+                    {
+                        _logger.LogInformation("⏳ Skip cooldown: {Title}", video.Title);
+                        continue;
+                    }
+                }
+
+                _logger.LogInformation("🔴 LIVE START: {Title}", video.Title);
+
+                await _discordService.SendVideoNotificationAsync(video);
+
+                _liveCooldown[video.VideoId] = DateTime.UtcNow;
+            }
+
+            _liveStateCache[video.VideoId] = currentState;
+        }
+
+        // 🔥 save state
+        await _liveStateService.SaveAsync(_liveStateCache);
+
+        _lastKnownVideoId = newIds.Last();
+
+        await _persistence.SaveStateAsync(new BotState
+        {
+            LastVideoId = _lastKnownVideoId
+        });
     }
 }
