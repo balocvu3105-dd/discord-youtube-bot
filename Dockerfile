@@ -4,7 +4,7 @@ WORKDIR /src
 COPY . .
 RUN dotnet publish -c Release -o /app
 
-# Run stage (🔥 FIX Ở ĐÂY)
+# Run stage 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
 COPY --from=build /app .
