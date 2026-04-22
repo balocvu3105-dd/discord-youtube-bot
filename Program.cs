@@ -19,7 +19,7 @@ builder.ConfigureLogging(logging =>
 {
     logging.ClearProviders();
     logging.AddConsole();
-    logging.SetMinimumLevel(LogLevel.Information);
+    logging.AddFilter("Microsoft", LogLevel.Warning);
 });
 
 builder.ConfigureServices((context, services) =>
