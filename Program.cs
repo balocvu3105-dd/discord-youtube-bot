@@ -1,54 +1,57 @@
-﻿using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using YouTubeDiscordBot.Config;
 using YouTubeDiscordBot.Services;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = Host.CreateDefaultBuilder(args);
 
-// 1. CONFIGURATION
-builder.Configuration
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-    .AddEnvironmentVariables();
+builder.ConfigureAppConfiguration((context, config) =>
+{
+    config
+        .SetBasePath(Directory.GetCurrentDirectory())
+        .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+        .AddEnvironmentVariables();
+});
 
-// 2. LOGGING
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
-builder.Logging.SetMinimumLevel(LogLevel.Debug);
+builder.ConfigureLogging(logging =>
+{
+    logging.ClearProviders();
+    logging.AddConsole();
+    logging.SetMinimumLevel(LogLevel.Information);
+});
 
-// 3. DEPENDENCY INJECTION (DI)
-builder.Services.Configure<BotConfiguration>(
-    builder.Configuration.GetSection(BotConfiguration.SectionName));
+builder.ConfigureServices((context, services) =>
+{
+    // Config
+    services.Configure<BotConfiguration>(
+        context.Configuration.GetSection(BotConfiguration.SectionName));
 
-// Đăng ký các Service xử lý logic
-builder.Services.AddSingleton<DiscordService>();
-builder.Services.AddSingleton<YouTubeApiService>(); // ĐÃ ĐỔI TÊN Ở ĐÂY
-builder.Services.AddSingleton<PersistenceService>();
+    // Services
+    services.AddSingleton<DiscordService>();
+    services.AddSingleton<YouTubeApiService>();
+    services.AddSingleton<PersistenceService>();
+    services.AddSingleton<LiveStateService>();
 
-// Đăng ký Worker chạy ngầm
-builder.Services.AddHostedService<YouTubeCheckerBackgroundService>();
-builder.Services.AddSingleton<LiveStateService>();
+    // Worker
+    services.AddHostedService<YouTubeCheckerBackgroundService>();
+});
 
-var app = builder.Build();
+var host = builder.Build();
 
-// 4. HEALTH CHECK (Cho Render & UptimeRobot)
-app.MapMethods("/", new[] { "GET", "HEAD" }, () => Results.Ok("Bot is running..."));
-
-// 5. START DISCORD CONNECTION
-var discordService = app.Services.GetRequiredService<DiscordService>();
-var logger = app.Services.GetRequiredService<ILogger<Program>>();
+// 🔥 connect Discord trước khi chạy loop
+var discord = host.Services.GetRequiredService<DiscordService>();
+var logger = host.Services.GetRequiredService<ILogger<Program>>();
 
 try
 {
     logger.LogInformation("🚀 Discord Bot is connecting...");
-    await discordService.ConnectAsync();
+    await discord.ConnectAsync();
 }
 catch (Exception ex)
 {
     logger.LogCritical(ex, "❌ Bot crashed during startup!");
 }
 
-await app.RunAsync();
+await host.RunAsync();
