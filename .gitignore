@@ -20,12 +20,10 @@ Release/
 Thumbs.db
 
 # Secrets & config
-appsettings.json
-appsettings.*.json
+
 
 # Runtime state
-live_state.json
-last_video_state.json
+
 
 # Docker
 .dockerignore

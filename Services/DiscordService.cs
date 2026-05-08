@@ -33,19 +33,39 @@ public class DiscordService : IAsyncDisposable
     {
         _logger.LogInformation("Đang kết nối vào Discord...");
 
-        await _client.LoginAsync(TokenType.Bot, _config.DiscordToken);
-        await _client.StartAsync();
+        _logger.LogInformation("Token loaded: {Status}",
+            string.IsNullOrEmpty(_config.DiscordToken) ? "NULL ❌" : "OK ✅");
 
-        await _readyTaskSource.Task;
+        try
+        {
+            await _client.LoginAsync(TokenType.Bot, _config.DiscordToken);
+            await _client.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(ex, "❌ Discord login failed");
+            throw;
+        }
 
-        _logger.LogInformation("Bot Discord đã kết nối và sẵn sàng!");
+        var completed = await Task.WhenAny(
+            _readyTaskSource.Task,
+            Task.Delay(TimeSpan.FromSeconds(15))
+        );
+
+        if (completed != _readyTaskSource.Task)
+            _logger.LogWarning("Discord connect timeout (có thể token sai)");
+
+        _logger.LogInformation("Bot Discord đã kết nối (hoặc timeout).");
     }
 
-    // 🔥 GỬI CHO MỌI SERVER (PARALLEL + SAFE)
+    // Expose client để InteractionService đăng ký slash command
+    public DiscordSocketClient Client => _client;
+
+    // ── YOUTUBE NOTIFICATION ─────────────────────────────────────────────────
+
     public async Task SendVideoNotificationAsync(VideoInfo video)
     {
-        var embed = BuildEmbed(video);
-
+        var embed = BuildVideoEmbed(video);
         var tasks = new List<Task>();
 
         foreach (var guild in _client.Guilds)
@@ -55,35 +75,66 @@ public class DiscordService : IAsyncDisposable
 
             if (channel == null)
             {
-                _logger.LogWarning("Server {Guild} không có channel {ChannelName}",
+                _logger.LogWarning("Server {Guild} không có channel #{ChannelName}",
                     guild.Name, _config.ChannelName);
                 continue;
             }
 
-            tasks.Add(SendSafeAsync(channel, embed, guild.Name, channel.Name));
+            tasks.Add(SendSafeAsync(channel, embed, null, guild.Name, channel.Name));
         }
 
         await Task.WhenAll(tasks);
     }
 
-    // 🔒 SAFE SEND (KHÔNG LÀM CHẾT TOÀN BỘ BATCH)
-    private async Task SendSafeAsync(ISocketMessageChannel channel, Embed embed, string guildName, string channelName)
+    // ── PROMO ────────────────────────────────────────────────────────────────
+
+    public async Task SendPromoAsync(Embed embed, MessageComponent components)
+    {
+        var tasks = new List<Task>();
+
+        foreach (var guild in _client.Guilds)
+        {
+            var channel = guild.TextChannels
+                .FirstOrDefault(c => c.Name.Equals(
+                    _config.PromoChannelName,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (channel == null)
+            {
+                _logger.LogWarning("Server {Guild} không có channel #{ChannelName}",
+                    guild.Name, _config.PromoChannelName);
+                continue;
+            }
+
+            tasks.Add(SendSafeAsync(channel, embed, components, guild.Name, channel.Name));
+        }
+
+        await Task.WhenAll(tasks);
+    }
+
+    // ── SHARED SAFE SEND ─────────────────────────────────────────────────────
+
+    private async Task SendSafeAsync(
+        ISocketMessageChannel channel,
+        Embed embed,
+        MessageComponent? components,
+        string guildName,
+        string channelName)
     {
         try
         {
-            await channel.SendMessageAsync(embed: embed);
-
-            _logger.LogInformation("Đã gửi thông báo tới {Guild} / #{Channel}",
-                guildName, channelName);
+            await channel.SendMessageAsync(embed: embed, components: components);
+            _logger.LogInformation("✅ Sent → {Guild} / #{Channel}", guildName, channelName);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Lỗi gửi Discord tới {Guild} / #{Channel}",
-                guildName, channelName);
+            _logger.LogError(ex, "❌ Send failed → {Guild} / #{Channel}", guildName, channelName);
         }
     }
 
-    private Embed BuildEmbed(VideoInfo video)
+    // ── EMBED BUILDER ─────────────────────────────────────────────────────────
+
+    private static Embed BuildVideoEmbed(VideoInfo video)
     {
         var color = video.IsLivestream ? Color.Red : Color.Blue;
 
@@ -91,22 +142,21 @@ public class DiscordService : IAsyncDisposable
             ? $"🔴 **{video.ChannelName}** đang LIVE!"
             : $"📹 **{video.ChannelName}** vừa đăng video mới!";
 
-        var builder = new EmbedBuilder()
+        return new EmbedBuilder()
             .WithTitle(video.Title)
             .WithUrl(video.Url)
             .WithDescription(headerText)
             .WithColor(color)
             .WithThumbnailUrl(video.ThumbnailUrl)
             .WithTimestamp(DateTimeOffset.UtcNow)
-            .WithFooter("YouTube Notifier Bot");
-
-        builder.AddField(
-            video.IsLivestream ? "🔴 Link Stream" : "▶️ Xem Ngay",
-            video.Url
-        );
-
-        return builder.Build();
+            .WithFooter("YouTube Notifier Bot")
+            .AddField(
+                video.IsLivestream ? "🔴 Link Stream" : "▶️ Xem Ngay",
+                video.Url)
+            .Build();
     }
+
+    // ── INTERNAL ──────────────────────────────────────────────────────────────
 
     private Task OnLog(LogMessage msg)
     {
@@ -122,7 +172,6 @@ public class DiscordService : IAsyncDisposable
         };
 
         _logger.Log(level, msg.Exception, "[Discord] {Message}", msg.Message);
-
         return Task.CompletedTask;
     }
 
