@@ -139,12 +139,14 @@ public class DiscordService
             // =====================================================
 
             string videoMessage =
+                "@everyone\n\n" +
                 "📺 Video mới lên sóng:\n\n" +
                 url;
 
             await SendToChannelAsync(
                 _config.VideoChannelName,
-                videoMessage);
+                videoMessage,
+                allowedMentions: AllowedMentions.All);
 
             _logger.LogInformation(
                 "✅ Video notification sent: {Title}",
