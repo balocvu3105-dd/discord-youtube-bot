@@ -14,7 +14,9 @@ public class DiscordService : IAsyncDisposable
     private readonly ILogger<DiscordService> _logger;
     private readonly TaskCompletionSource _readyTaskSource = new();
 
-    public DiscordService(IOptions<BotConfiguration> config, ILogger<DiscordService> logger)
+    public DiscordService(
+        IOptions<BotConfiguration> config,
+        ILogger<DiscordService> logger)
     {
         _config = config.Value;
         _logger = logger;
@@ -25,57 +27,90 @@ public class DiscordService : IAsyncDisposable
         };
 
         _client = new DiscordSocketClient(socketConfig);
+
         _client.Log += OnLog;
         _client.Ready += OnReady;
     }
 
+    // =========================================================
+    // CONNECT
+    // =========================================================
+
     public async Task ConnectAsync()
     {
-        _logger.LogInformation("Đang kết nối vào Discord...");
-        _logger.LogInformation("Token loaded: {Status}",
-            string.IsNullOrEmpty(_config.DiscordToken) ? "NULL ❌" : "OK ✅");
+        _logger.LogInformation(
+            "Đang kết nối vào Discord...");
+
+        _logger.LogInformation(
+            "Token loaded: {Status}",
+            string.IsNullOrWhiteSpace(_config.DiscordToken)
+                ? "NULL ❌"
+                : "OK ✅");
 
         try
         {
-            await _client.LoginAsync(TokenType.Bot, _config.DiscordToken);
+            await _client.LoginAsync(
+                TokenType.Bot,
+                _config.DiscordToken);
+
             await _client.StartAsync();
         }
         catch (Exception ex)
         {
-            _logger.LogCritical(ex, "❌ Discord login failed");
+            _logger.LogCritical(
+                ex,
+                "❌ Discord login failed");
+
             throw;
         }
 
         var completed = await Task.WhenAny(
             _readyTaskSource.Task,
-            Task.Delay(TimeSpan.FromSeconds(15))
-        );
+            Task.Delay(TimeSpan.FromSeconds(15)));
 
         if (completed != _readyTaskSource.Task)
-            _logger.LogWarning("Discord connect timeout (có thể token sai)");
+        {
+            _logger.LogWarning(
+                "Discord connect timeout (có thể token sai)");
+        }
 
-        _logger.LogInformation("Bot Discord đã kết nối (hoặc timeout).");
+        _logger.LogInformation(
+            "Bot Discord đã kết nối (hoặc timeout).");
     }
 
     public DiscordSocketClient Client => _client;
 
-    // ── YOUTUBE NOTIFICATION ──────────────────────────────────────────────────
+    // =========================================================
+    // VIDEO NOTIFICATION
+    // =========================================================
 
-    public async Task SendVideoNotificationAsync(VideoInfo video)
+    public async Task SendVideoNotificationAsync(
+        VideoInfo video)
     {
         var embed = BuildVideoEmbed(video);
-        await SendToChannelAsync(_config.ChannelName, embed);
+
+        await SendToChannelAsync(
+            _config.ChannelName,
+            embed);
     }
 
-    // ── PROMO ─────────────────────────────────────────────────────────────────
+    // =========================================================
+    // PROMO
+    // =========================================================
 
-    // Giữ nguyên method cũ để PromoBackgroundService và PromoCommand không bị lỗi
-    public async Task SendPromoAsync(Embed embed, MessageComponent components)
+    public async Task SendPromoAsync(
+        Embed embed,
+        MessageComponent components)
     {
-        await SendToChannelAsync(_config.PromoChannelName, embed, components);
+        await SendToChannelAsync(
+            _config.PromoChannelName,
+            embed,
+            components);
     }
 
-    // ── GENERIC SEND (dùng chung cho tất cả) ──────────────────────────────────
+    // =========================================================
+    // GENERIC SEND
+    // =========================================================
 
     public async Task SendToChannelAsync(
         string channelName,
@@ -86,24 +121,56 @@ public class DiscordService : IAsyncDisposable
 
         foreach (var guild in _client.Guilds)
         {
-            var channel = guild.TextChannels
-                .FirstOrDefault(c => c.Name.Equals(
-                    channelName, StringComparison.OrdinalIgnoreCase));
+            _logger.LogInformation(
+                "📂 Guild: {Guild}",
+                guild.Name);
+
+            // Debug toàn bộ channel bot nhìn thấy
+            foreach (var rawChannel in guild.Channels)
+            {
+                _logger.LogInformation(
+                    "➡️ Channel found: {Channel} ({Type})",
+                    rawChannel.Name,
+                    rawChannel.GetType().Name);
+            }
+
+            // Tìm text channel
+            var channel = guild.Channels
+                .OfType<SocketTextChannel>()
+                .FirstOrDefault(c =>
+                    c.Name.Trim().Equals(
+                        channelName.Trim(),
+                        StringComparison.OrdinalIgnoreCase));
 
             if (channel == null)
             {
-                _logger.LogWarning("Server {Guild} không có channel #{Channel}",
-                    guild.Name, channelName);
+                _logger.LogWarning(
+                    "❌ Server {Guild} không tìm thấy channel #{Channel}",
+                    guild.Name,
+                    channelName);
+
                 continue;
             }
 
-            tasks.Add(SendSafeAsync(channel, embed, components, guild.Name, channel.Name));
+            _logger.LogInformation(
+                "✅ Found target channel: #{Channel}",
+                channel.Name);
+
+            tasks.Add(
+                SendSafeAsync(
+                    channel,
+                    embed,
+                    components,
+                    guild.Name,
+                    channel.Name));
         }
 
         await Task.WhenAll(tasks);
     }
 
-    // ── SHARED SAFE SEND ──────────────────────────────────────────────────────
+    // =========================================================
+    // SAFE SEND
+    // =========================================================
 
     private async Task SendSafeAsync(
         ISocketMessageChannel channel,
@@ -114,20 +181,36 @@ public class DiscordService : IAsyncDisposable
     {
         try
         {
-            await channel.SendMessageAsync(embed: embed, components: components);
-            _logger.LogInformation("✅ Sent → {Guild} / #{Channel}", guildName, channelName);
+            await channel.SendMessageAsync(
+                embed: embed,
+                components: components);
+
+            _logger.LogInformation(
+                "✅ Sent → {Guild} / #{Channel}",
+                guildName,
+                channelName);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Send failed → {Guild} / #{Channel}", guildName, channelName);
+            _logger.LogError(
+                ex,
+                "❌ Send failed → {Guild} / #{Channel}",
+                guildName,
+                channelName);
         }
     }
 
-    // ── EMBED BUILDER ─────────────────────────────────────────────────────────
+    // =========================================================
+    // EMBED
+    // =========================================================
 
-    private static Embed BuildVideoEmbed(VideoInfo video)
+    private static Embed BuildVideoEmbed(
+        VideoInfo video)
     {
-        var color = video.IsLivestream ? Color.Red : Color.Blue;
+        var color = video.IsLivestream
+            ? Color.Red
+            : Color.Blue;
+
         string headerText = video.IsLivestream
             ? $"🔴 **{video.ChannelName}** đang LIVE!"
             : $"📹 **{video.ChannelName}** vừa đăng video mới!";
@@ -141,12 +224,16 @@ public class DiscordService : IAsyncDisposable
             .WithTimestamp(DateTimeOffset.UtcNow)
             .WithFooter("YouTube Notifier Bot")
             .AddField(
-                video.IsLivestream ? "🔴 Link Stream" : "▶️ Xem Ngay",
+                video.IsLivestream
+                    ? "🔴 Link Stream"
+                    : "▶️ Xem Ngay",
                 video.Url)
             .Build();
     }
 
-    // ── INTERNAL ──────────────────────────────────────────────────────────────
+    // =========================================================
+    // DISCORD EVENTS
+    // =========================================================
 
     private Task OnLog(LogMessage msg)
     {
@@ -161,21 +248,37 @@ public class DiscordService : IAsyncDisposable
             _ => LogLevel.Information
         };
 
-        _logger.Log(level, msg.Exception, "[Discord] {Message}", msg.Message);
+        _logger.Log(
+            level,
+            msg.Exception,
+            "[Discord] {Message}",
+            msg.Message);
+
         return Task.CompletedTask;
     }
 
     private Task OnReady()
     {
-        _logger.LogInformation("Đã đăng nhập với tên: {Username}", _client.CurrentUser.Username);
+        _logger.LogInformation(
+            "Đã đăng nhập với tên: {Username}",
+            _client.CurrentUser.Username);
+
         _readyTaskSource.TrySetResult();
+
         return Task.CompletedTask;
     }
+
+    // =========================================================
+    // DISPOSE
+    // =========================================================
 
     public async ValueTask DisposeAsync()
     {
         await _client.LogoutAsync();
+
         await _client.StopAsync();
+
         _client.Dispose();
     }
 }
+

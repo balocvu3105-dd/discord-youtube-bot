@@ -73,7 +73,6 @@ public class PromoChangeBackgroundService : BackgroundService
         var embed = BuildChangeEmbed(changes);
         await _discordService.SendToChannelAsync(_config.PromoChannelName, embed);
     }
-
     private static Embed BuildChangeEmbed(PromoChanges changes)
     {
         var eb = new EmbedBuilder()
@@ -82,32 +81,89 @@ public class PromoChangeBackgroundService : BackgroundService
             .WithCurrentTimestamp()
             .WithFooter("ldshop.gg • Cập nhật tự động");
 
+        // =====================================================
+        // NEW DEALS
+        // =====================================================
+
         if (changes.NewGames.Count > 0)
         {
             var lines = changes.NewGames
-                .Select(g => $"🆕 **{g.Name}** — -{g.DiscountPercent}% ([Nạp ngay]({g.Url}))");
-            eb.AddField("✨ Deal mới xuất hiện", string.Join("\n", lines));
+                .Take(10)
+                .Select(g =>
+                    $"🆕 **{g.Name}** — -{g.DiscountPercent}%");
+
+            var text = string.Join("\n", lines);
+
+            if (changes.NewGames.Count > 10)
+            {
+                text +=
+                    $"\n\n...và thêm {changes.NewGames.Count - 10} deal khác";
+            }
+
+            eb.AddField(
+                "✨ Deal mới xuất hiện",
+                text);
         }
+
+        // =====================================================
+        // UPDATED DEALS
+        // =====================================================
 
         if (changes.UpdatedGames.Count > 0)
         {
-            var lines = changes.UpdatedGames.Select(u =>
+            var lines = changes.UpdatedGames
+                .Take(10)
+                .Select(u =>
+                {
+                    var arrow =
+                        u.Promo.DiscountPercent > u.OldDiscount
+                            ? "📈"
+                            : "📉";
+
+                    return
+                        $"{arrow} **{u.Promo.Name}** — " +
+                        $"~~-{u.OldDiscount}%~~ → " +
+                        $"**-{u.Promo.DiscountPercent}%**";
+                });
+
+            var text = string.Join("\n", lines);
+
+            if (changes.UpdatedGames.Count > 10)
             {
-                var arrow = u.Promo.DiscountPercent > u.OldDiscount ? "📈" : "📉";
-                return $"{arrow} **{u.Promo.Name}** — " +
-                       $"~~-{u.OldDiscount}%~~ → **-{u.Promo.DiscountPercent}%** " +
-                       $"([Xem]({u.Promo.Url}))";
-            });
-            eb.AddField("🔄 Thay đổi phần trăm", string.Join("\n", lines));
+                text +=
+                    $"\n\n...và thêm {changes.UpdatedGames.Count - 10} thay đổi";
+            }
+
+            eb.AddField(
+                "🔄 Thay đổi phần trăm",
+                text);
         }
+
+        // =====================================================
+        // REMOVED DEALS
+        // =====================================================
 
         if (changes.RemovedGames.Count > 0)
         {
             var lines = changes.RemovedGames
-                .Select(g => $"❌ **{g.Name}** — deal -{g.DiscountPercent}% đã kết thúc");
-            eb.AddField("⏰ Ưu đãi kết thúc", string.Join("\n", lines));
+                .Take(10)
+                .Select(g =>
+                    $"❌ **{g.Name}** — deal kết thúc");
+
+            var text = string.Join("\n", lines);
+
+            if (changes.RemovedGames.Count > 10)
+            {
+                text +=
+                    $"\n\n...và thêm {changes.RemovedGames.Count - 10} deal hết hạn";
+            }
+
+            eb.AddField(
+                "⏰ Ưu đãi kết thúc",
+                text);
         }
 
         return eb.Build();
     }
 }
+
