@@ -125,18 +125,11 @@ public class DiscordService : IAsyncDisposable
                 "📂 Guild: {Guild}",
                 guild.Name);
 
-            // Debug toàn bộ channel bot nhìn thấy
-            foreach (var rawChannel in guild.Channels)
-            {
-                _logger.LogInformation(
-                    "➡️ Channel found: {Channel} ({Type})",
-                    rawChannel.Name,
-                    rawChannel.GetType().Name);
-            }
-
-            // Tìm text channel
+            // Chỉ tìm text/news channel
             var channel = guild.Channels
-                .OfType<SocketTextChannel>()
+                .Where(c =>
+                    c is SocketTextChannel ||
+                    c is SocketNewsChannel)
                 .FirstOrDefault(c =>
                     c.Name.Trim().Equals(
                         channelName.Trim(),
@@ -145,7 +138,7 @@ public class DiscordService : IAsyncDisposable
             if (channel == null)
             {
                 _logger.LogWarning(
-                    "❌ Server {Guild} không tìm thấy channel #{Channel}",
+                    "❌ Guild {Guild} không có channel #{Channel}",
                     guild.Name,
                     channelName);
 
@@ -158,7 +151,7 @@ public class DiscordService : IAsyncDisposable
 
             tasks.Add(
                 SendSafeAsync(
-                    channel,
+                    (ISocketMessageChannel)channel,
                     embed,
                     components,
                     guild.Name,
@@ -281,4 +274,3 @@ public class DiscordService : IAsyncDisposable
         _client.Dispose();
     }
 }
-

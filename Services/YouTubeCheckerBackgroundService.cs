@@ -1,5 +1,4 @@
-﻿
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using YouTubeDiscordBot.Config;
@@ -18,10 +17,10 @@ public class YouTubeCheckerBackgroundService : BackgroundService
 
     private string _lastKnownVideoId = string.Empty;
 
-    // persist live state (upcoming / live / none)
+    // persist live state
     private Dictionary<string, string> _liveStateCache = new();
 
-    // anti-flicker: tránh spam notify cùng 1 video
+    // anti duplicate live
     private readonly Dictionary<string, DateTime> _liveCooldown = new();
 
     public YouTubeCheckerBackgroundService(
@@ -40,14 +39,18 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         _logger = logger;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(
+        CancellationToken stoppingToken)
     {
-        _logger.LogInformation("🚀 Service start");
+        _logger.LogInformation("🚀 YouTube checker started");
 
         var state = await _persistence.LoadStateAsync();
-        _lastKnownVideoId = state.LastVideoId ?? "";
 
-        _liveStateCache = await _liveStateService.LoadAsync();
+        _lastKnownVideoId =
+            state.LastVideoId ?? string.Empty;
+
+        _liveStateCache =
+            await _liveStateService.LoadAsync();
 
         _logger.LogInformation(
             "Loaded live state: {Count} items",
@@ -57,19 +60,20 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         {
             try
             {
-                // Check video mới + live transition
                 await CheckForNewVideoAsync();
 
-                // Check livestream hiện tại
                 await CheckCurrentLiveAsync();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Lỗi loop chính");
+                _logger.LogError(
+                    ex,
+                    "❌ Main loop error");
             }
 
-            // tối thiểu 30 phút
-            int delay = Math.Max(_config.CheckIntervalSeconds, 900);
+            // 5 phút
+            int delay =
+                _config.CheckIntervalSeconds;
 
             _logger.LogInformation(
                 "⏱ Next check in {Seconds}s",
@@ -81,50 +85,41 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         }
     }
 
-    // ========================= CHECK NEW VIDEO =========================
+    // =========================================================
+    // NEW VIDEO CHECK
+    // =========================================================
 
     private async Task CheckForNewVideoAsync()
     {
-        var apiIds = await _youtubeApi.GetLatestVideoIdsFromApiAsync();
+        var apiIds =
+            await _youtubeApi.GetLatestVideoIdsFromApiAsync();
 
         if (apiIds == null || apiIds.Count == 0)
-            return;
-
-        // INIT
-        if (string.IsNullOrEmpty(_lastKnownVideoId))
         {
-            _lastKnownVideoId = apiIds[0];
-
-            await _persistence.SaveStateAsync(new BotState
-            {
-                LastVideoId = _lastKnownVideoId
-            });
-
-            _logger.LogInformation(
-                "🔖 Init: set lastKnownVideoId = {Id}",
-                _lastKnownVideoId);
-
-            var initVideo =
-                await _youtubeApi.GetVideoByIdAsync(_lastKnownVideoId);
-
-            if (initVideo != null
-                && initVideo.LiveBroadcastContent == "live")
-            {
-                _logger.LogInformation(
-                    "🔴 INIT LIVE SEND: {Title}",
-                    initVideo.Title);
-
-                await _discordService
-                    .SendVideoNotificationAsync(initVideo);
-
-                _liveCooldown[initVideo.VideoId] =
-                    DateTime.UtcNow;
-            }
+            _logger.LogWarning(
+                "⚠️ RSS returned 0 videos");
 
             return;
         }
 
-        // lấy danh sách video mới
+        // INIT
+        if (string.IsNullOrWhiteSpace(_lastKnownVideoId))
+        {
+            _lastKnownVideoId = apiIds[0];
+
+            await _persistence.SaveStateAsync(
+                new BotState
+                {
+                    LastVideoId = _lastKnownVideoId
+                });
+
+            _logger.LogInformation(
+                "🔖 Init last video = {Id}",
+                _lastKnownVideoId);
+
+            return;
+        }
+
         var newIds = new List<string>();
 
         foreach (var id in apiIds)
@@ -137,7 +132,9 @@ public class YouTubeCheckerBackgroundService : BackgroundService
 
         if (newIds.Count == 0)
         {
-            _logger.LogInformation("✅ No new videos");
+            _logger.LogInformation(
+                "✅ No new videos");
+
             return;
         }
 
@@ -145,27 +142,40 @@ public class YouTubeCheckerBackgroundService : BackgroundService
 
         foreach (var id in newIds)
         {
-            var video = await _youtubeApi.GetVideoByIdAsync(id);
+            // anti duplicate
+            if (id == _lastKnownVideoId)
+            {
+                _logger.LogInformation(
+                    "⏭ Duplicate skipped: {Id}",
+                    id);
+
+                continue;
+            }
+
+            var video =
+                await _youtubeApi.GetVideoByIdAsync(id);
 
             if (video == null)
                 continue;
 
-            var currentState = video.LiveBroadcastContent;
+            var currentState =
+                video.LiveBroadcastContent;
 
             _liveStateCache.TryGetValue(
                 video.VideoId,
                 out var previousState);
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Video: {Title} | Prev: {Prev} -> Now: {Now}",
                 video.Title,
                 previousState ?? "null",
                 currentState);
 
-            // lần đầu detect video này
+            // FIRST DETECT
             if (previousState == null)
             {
-                _liveStateCache[video.VideoId] = currentState;
+                _liveStateCache[video.VideoId] =
+                    currentState;
 
                 if (currentState == "live")
                 {
@@ -201,10 +211,10 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                         out var lastSent))
                 {
                     if ((DateTime.UtcNow - lastSent)
-                        .TotalHours < 2)
+                        .TotalMinutes < 90)
                     {
                         _logger.LogInformation(
-                            "⏳ Skip cooldown: {Title}",
+                            "⏳ Cooldown skip: {Title}",
                             video.Title);
 
                         continue;
@@ -212,7 +222,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 }
 
                 _logger.LogInformation(
-                    "🔴 LIVE DETECTED via transition: {Title}",
+                    "🔴 LIVE DETECTED: {Title}",
                     video.Title);
 
                 await _discordService
@@ -221,7 +231,6 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 _liveCooldown[video.VideoId] =
                     DateTime.UtcNow;
 
-                // persist cooldown qua restart
                 _liveStateCache[video.VideoId] =
                     "live_notified_" +
                     DateTime.UtcNow.ToString("o");
@@ -237,19 +246,24 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         await _liveStateService
             .SaveAsync(_liveStateCache);
 
-        _lastKnownVideoId = newIds.Last();
+        _lastKnownVideoId =
+            newIds.Last();
 
-        await _persistence.SaveStateAsync(new BotState
-        {
-            LastVideoId = _lastKnownVideoId
-        });
+        await _persistence.SaveStateAsync(
+            new BotState
+            {
+                LastVideoId = _lastKnownVideoId
+            });
     }
 
-    // ========================= CHECK CURRENT LIVE =========================
+    // =========================================================
+    // CURRENT LIVE CHECK
+    // =========================================================
 
     private async Task CheckCurrentLiveAsync()
     {
-        var live = await _youtubeApi.GetCurrentLiveAsync();
+        var live =
+            await _youtubeApi.GetCurrentLiveAsync();
 
         if (live == null)
         {
@@ -259,7 +273,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             return;
         }
 
-        // persist cache
+        // cache cooldown
         if (_liveStateCache.TryGetValue(
                 live.VideoId,
                 out var cachedState)
@@ -272,10 +286,10 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                     out var notifiedAt))
             {
                 if ((DateTime.UtcNow - notifiedAt)
-                    .TotalHours < 2)
+                    .TotalMinutes < 90)
                 {
                     _logger.LogInformation(
-                        "⏳ Live cooldown active (cache): {Title}",
+                        "⏳ Cache cooldown active: {Title}",
                         live.Title);
 
                     return;
@@ -283,16 +297,16 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             }
         }
 
-        // RAM cooldown
+        // ram cooldown
         if (_liveCooldown.TryGetValue(
                 live.VideoId,
                 out var lastSent))
         {
             if ((DateTime.UtcNow - lastSent)
-                .TotalHours < 2)
+                .TotalMinutes < 90)
             {
                 _logger.LogInformation(
-                    "⏳ Live cooldown active (ram): {Title}",
+                    "⏳ RAM cooldown active: {Title}",
                     live.Title);
 
                 return;
@@ -309,7 +323,6 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         _liveCooldown[live.VideoId] =
             DateTime.UtcNow;
 
-        // persist qua restart
         _liveStateCache[live.VideoId] =
             "live_notified_" +
             DateTime.UtcNow.ToString("o");
@@ -318,4 +331,3 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             .SaveAsync(_liveStateCache);
     }
 }
-
