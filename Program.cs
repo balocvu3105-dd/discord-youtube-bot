@@ -1,8 +1,12 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using DotNetEnv;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using YouTubeDiscordBot.Config;
 using YouTubeDiscordBot.Services;
+
+// Load .env
+Env.Load();
 
 var builder = Host.CreateApplicationBuilder(args);
 
