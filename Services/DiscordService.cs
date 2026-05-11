@@ -111,39 +111,40 @@ public class DiscordService
             string url =
                 $"https://www.youtube.com/watch?v={video.VideoId}";
 
-            string message;
-
             // =====================================================
             // LIVESTREAM
             // =====================================================
 
             if (video.LiveBroadcastContent == "live")
             {
-                message =
+                string liveMessage =
                     "@everyone\n\n" +
                     "🔴 Tôi đang live rồi anh em ơi:\n\n" +
                     url;
+
+                await SendToChannelAsync(
+                    _config.LiveChannelName,
+                    liveMessage,
+                    allowedMentions: AllowedMentions.All);
+
+                _logger.LogInformation(
+                    "✅ Live notification sent: {Title}",
+                    video.Title);
+
+                return;
             }
 
             // =====================================================
             // NORMAL VIDEO
             // =====================================================
 
-            else
-            {
-                message =
-                    "📺 Video mới lên sóng:\n\n" +
-                    url;
-            }
-
-            // =====================================================
-            // SEND
-            // =====================================================
+            string videoMessage =
+                "📺 Video mới lên sóng:\n\n" +
+                url;
 
             await SendToChannelAsync(
-                _config.ChannelName,
-                message,
-                allowedMentions: AllowedMentions.All);
+                _config.VideoChannelName,
+                videoMessage);
 
             _logger.LogInformation(
                 "✅ Video notification sent: {Title}",
