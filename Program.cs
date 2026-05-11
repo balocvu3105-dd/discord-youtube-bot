@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using YouTubeDiscordBot.Config;
 using YouTubeDiscordBot.Services;
+using YouTubeDiscordBot.Commands;
 
 var builder = Host.CreateDefaultBuilder(args);
 
@@ -39,6 +40,15 @@ builder.ConfigureServices((context, services) =>
     // Promo
     services.AddSingleton<PromoService>();
     services.AddHostedService<PromoBackgroundService>();
+
+    // ↓ THÊM 3 DÒNG NÀY VÀO ĐÂY ↓
+    services.AddSingleton<LdShopScraperService>();
+    services.AddSingleton<PromoChangeDetectorService>();
+    services.AddHostedService<PromoChangeBackgroundService>();
+
+    // Thêm vào ngay sau dòng "// Promo"
+    services.AddSingleton<ShopInfoService>();
+    services.AddHostedService<ShopInfoBackgroundService>();
 
     // Slash commands — InteractionService của Discord.Net
     services.AddSingleton(provider =>

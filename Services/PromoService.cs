@@ -77,7 +77,7 @@ public class PromoService
     private (Embed embed, MessageComponent components) BuildPromo(GamePromo game)
     {
         // 3 version A/B testing
-        int variant = _random.Value.Next(3);
+        int variant = _random.Value!.Next(3);
 
         (string title, string description, string buttonText) content = variant switch
         {

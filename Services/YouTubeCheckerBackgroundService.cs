@@ -69,7 +69,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             }
 
             // tối thiểu 30 phút
-            int delay = Math.Max(_config.CheckIntervalSeconds, 1800);
+            int delay = Math.Max(_config.CheckIntervalSeconds, 900);
 
             _logger.LogInformation(
                 "⏱ Next check in {Seconds}s",

@@ -32,7 +32,6 @@ public class DiscordService : IAsyncDisposable
     public async Task ConnectAsync()
     {
         _logger.LogInformation("Đang kết nối vào Discord...");
-
         _logger.LogInformation("Token loaded: {Status}",
             string.IsNullOrEmpty(_config.DiscordToken) ? "NULL ❌" : "OK ✅");
 
@@ -58,37 +57,30 @@ public class DiscordService : IAsyncDisposable
         _logger.LogInformation("Bot Discord đã kết nối (hoặc timeout).");
     }
 
-    // Expose client để InteractionService đăng ký slash command
     public DiscordSocketClient Client => _client;
 
-    // ── YOUTUBE NOTIFICATION ─────────────────────────────────────────────────
+    // ── YOUTUBE NOTIFICATION ──────────────────────────────────────────────────
 
     public async Task SendVideoNotificationAsync(VideoInfo video)
     {
         var embed = BuildVideoEmbed(video);
-        var tasks = new List<Task>();
-
-        foreach (var guild in _client.Guilds)
-        {
-            var channel = guild.TextChannels
-                .FirstOrDefault(c => c.Name.Equals(_config.ChannelName, StringComparison.OrdinalIgnoreCase));
-
-            if (channel == null)
-            {
-                _logger.LogWarning("Server {Guild} không có channel #{ChannelName}",
-                    guild.Name, _config.ChannelName);
-                continue;
-            }
-
-            tasks.Add(SendSafeAsync(channel, embed, null, guild.Name, channel.Name));
-        }
-
-        await Task.WhenAll(tasks);
+        await SendToChannelAsync(_config.ChannelName, embed);
     }
 
-    // ── PROMO ────────────────────────────────────────────────────────────────
+    // ── PROMO ─────────────────────────────────────────────────────────────────
 
+    // Giữ nguyên method cũ để PromoBackgroundService và PromoCommand không bị lỗi
     public async Task SendPromoAsync(Embed embed, MessageComponent components)
+    {
+        await SendToChannelAsync(_config.PromoChannelName, embed, components);
+    }
+
+    // ── GENERIC SEND (dùng chung cho tất cả) ──────────────────────────────────
+
+    public async Task SendToChannelAsync(
+        string channelName,
+        Embed embed,
+        MessageComponent? components = null)
     {
         var tasks = new List<Task>();
 
@@ -96,13 +88,12 @@ public class DiscordService : IAsyncDisposable
         {
             var channel = guild.TextChannels
                 .FirstOrDefault(c => c.Name.Equals(
-                    _config.PromoChannelName,
-                    StringComparison.OrdinalIgnoreCase));
+                    channelName, StringComparison.OrdinalIgnoreCase));
 
             if (channel == null)
             {
-                _logger.LogWarning("Server {Guild} không có channel #{ChannelName}",
-                    guild.Name, _config.PromoChannelName);
+                _logger.LogWarning("Server {Guild} không có channel #{Channel}",
+                    guild.Name, channelName);
                 continue;
             }
 
@@ -112,7 +103,7 @@ public class DiscordService : IAsyncDisposable
         await Task.WhenAll(tasks);
     }
 
-    // ── SHARED SAFE SEND ─────────────────────────────────────────────────────
+    // ── SHARED SAFE SEND ──────────────────────────────────────────────────────
 
     private async Task SendSafeAsync(
         ISocketMessageChannel channel,
@@ -137,7 +128,6 @@ public class DiscordService : IAsyncDisposable
     private static Embed BuildVideoEmbed(VideoInfo video)
     {
         var color = video.IsLivestream ? Color.Red : Color.Blue;
-
         string headerText = video.IsLivestream
             ? $"🔴 **{video.ChannelName}** đang LIVE!"
             : $"📹 **{video.ChannelName}** vừa đăng video mới!";
