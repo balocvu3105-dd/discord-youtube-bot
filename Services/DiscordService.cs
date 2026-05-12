@@ -1,5 +1,4 @@
-﻿using Discord;
-using Discord.WebSocket;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using YouTubeDiscordBot.Config;
@@ -7,294 +6,300 @@ using YouTubeDiscordBot.Models;
 
 namespace YouTubeDiscordBot.Services;
 
-public class DiscordService
+public class YouTubeCheckerBackgroundService : BackgroundService
 {
-    private readonly DiscordSocketClient _client;
+    private readonly YouTubeApiService _youtubeApi;
 
-    public DiscordSocketClient Client => _client;
+    private readonly DiscordService _discordService;
+
+    private readonly PersistenceService _persistence;
+
+    private readonly LiveStateService _liveStateService;
 
     private readonly BotConfiguration _config;
-    private readonly ILogger<DiscordService> _logger;
 
-    public DiscordService(
+    private readonly ILogger<YouTubeCheckerBackgroundService>
+        _logger;
+
+    private string _lastKnownVideoId =
+        string.Empty;
+
+    private Dictionary<string, string>
+        _liveStateCache = new();
+
+    public YouTubeCheckerBackgroundService(
+        YouTubeApiService youtubeApi,
+        DiscordService discordService,
+        PersistenceService persistence,
+        LiveStateService liveStateService,
         IOptions<BotConfiguration> config,
-        ILogger<DiscordService> logger)
+        ILogger<YouTubeCheckerBackgroundService> logger)
     {
-        _config = config.Value;
-        _logger = logger;
+        _youtubeApi =
+            youtubeApi;
 
-        var socketConfig = new DiscordSocketConfig
-        {
-            GatewayIntents =
-                GatewayIntents.Guilds |
-                GatewayIntents.GuildMessages,
+        _discordService =
+            discordService;
 
-            LogGatewayIntentWarnings = false
-        };
+        _persistence =
+            persistence;
 
-        _client = new DiscordSocketClient(socketConfig);
+        _liveStateService =
+            liveStateService;
 
-        _client.Log += OnDiscordLogAsync;
+        _config =
+            config.Value;
+
+        _logger =
+            logger;
     }
 
     // =========================================================
-    // CONNECT
+    // MAIN LOOP
     // =========================================================
 
-    public async Task ConnectAsync()
+    protected override async Task ExecuteAsync(
+        CancellationToken stoppingToken)
     {
-        try
-        {
-            _logger.LogInformation(
-                "Đang kết nối vào Discord...");
+        _logger.LogInformation(
+            "🚀 YouTube checker started");
 
-            if (string.IsNullOrWhiteSpace(
-                    _config.DiscordToken))
+        var state =
+            await _persistence.LoadStateAsync();
+
+        _lastKnownVideoId =
+            state.LastVideoId ?? string.Empty;
+
+        _liveStateCache =
+            await _liveStateService.LoadAsync();
+
+        _logger.LogInformation(
+            "Loaded live state: {Count} items",
+            _liveStateCache.Count);
+
+        while (!stoppingToken
+               .IsCancellationRequested)
+        {
+            try
             {
-                throw new Exception(
-                    "DiscordToken bị trống!");
+                await CheckForNewVideoAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "❌ Main loop error");
             }
 
-            _logger.LogInformation(
-                "Token loaded: OK ✅");
-
-            await _client.LoginAsync(
-                TokenType.Bot,
-                _config.DiscordToken);
-
-            await _client.StartAsync();
-
-            var readyTask =
-                new TaskCompletionSource<bool>();
-
-            _client.Ready += () =>
-            {
-                readyTask.TrySetResult(true);
-
-                _logger.LogInformation(
-                    "Đã đăng nhập với tên: {Name}",
-                    _client.CurrentUser.Username);
-
-                return Task.CompletedTask;
-            };
-
-            await Task.WhenAny(
-                readyTask.Task,
-                Task.Delay(TimeSpan.FromSeconds(30)));
-
-            if (!readyTask.Task.IsCompleted)
-            {
-                _logger.LogWarning(
-                    "Discord connect timeout (có thể token sai)");
-            }
+            int delay =
+                _config.CheckIntervalSeconds;
 
             _logger.LogInformation(
-                "Bot Discord đã kết nối (hoặc timeout).");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "❌ Không thể kết nối Discord");
+                "⏱ Next check in {Seconds}s",
+                delay);
+
+            await Task.Delay(
+                TimeSpan.FromSeconds(delay),
+                stoppingToken);
         }
     }
 
     // =========================================================
-    // SEND VIDEO NOTIFICATION
+    // CHECK NEW VIDEO / LIVE
     // =========================================================
 
-    public async Task SendVideoNotificationAsync(
-        VideoInfo video)
+    private async Task CheckForNewVideoAsync()
     {
-        try
-        {
-            string url =
-                $"https://www.youtube.com/watch?v={video.VideoId}";
+        var apiIds =
+            await _youtubeApi
+                .GetLatestVideoIdsFromApiAsync();
 
-            // =====================================================
+        if (apiIds == null ||
+            apiIds.Count == 0)
+        {
+            _logger.LogWarning(
+                "⚠️ API returned 0 videos");
+
+            return;
+        }
+
+        // =====================================================
+        // INIT FIRST RUN
+        // =====================================================
+
+        if (string.IsNullOrWhiteSpace(
+                _lastKnownVideoId))
+        {
+            _lastKnownVideoId =
+                apiIds[0];
+
+            await _persistence.SaveStateAsync(
+                new BotState
+                {
+                    LastVideoId =
+                        _lastKnownVideoId
+                });
+
+            _logger.LogInformation(
+                "🔖 Init last video = {Id}",
+                _lastKnownVideoId);
+
+            return;
+        }
+
+        // =====================================================
+        // FIND NEW VIDEO IDS
+        // =====================================================
+
+        var newIds =
+            new List<string>();
+
+        foreach (var id in apiIds)
+        {
+            if (id == _lastKnownVideoId)
+                break;
+
+            newIds.Add(id);
+        }
+
+        if (newIds.Count == 0)
+        {
+            _logger.LogInformation(
+                "✅ No new videos");
+
+            return;
+        }
+
+        // Send oldest → newest
+        newIds.Reverse();
+
+        // =====================================================
+        // PROCESS VIDEOS
+        // =====================================================
+
+        foreach (var id in newIds)
+        {
+            var video =
+                await _youtubeApi
+                    .GetVideoByIdAsync(id);
+
+            if (video == null)
+                continue;
+
+            var currentState =
+                video.LiveBroadcastContent
+                    ?.ToLower() ?? "none";
+
+            _logger.LogInformation(
+                "🎥 Detect: {Title} | state={State}",
+                video.Title,
+                currentState);
+
+            // =================================================
             // LIVESTREAM
-            // =====================================================
+            // =================================================
 
-            if (video.LiveBroadcastContent == "live")
+            if (currentState == "live")
             {
-                string liveMessage =
-                    "@everyone\n\n" +
-                    "🔴 Tôi đang live rồi anh em ơi:\n\n" +
-                    url;
+                // Already notified?
+                if (_liveStateCache
+                    .ContainsKey(video.VideoId))
+                {
+                    _logger.LogInformation(
+                        "⏭ Live already notified: {Title}",
+                        video.Title);
 
-                await SendToChannelAsync(
-                    _config.LiveChannelName,
-                    liveMessage,
-                    allowedMentions: AllowedMentions.All);
+                    continue;
+                }
 
                 _logger.LogInformation(
-                    "✅ Live notification sent: {Title}",
+                    "🔴 LIVE DETECTED: {Title}",
                     video.Title);
 
-                return;
-            }
+                // Send live message
+                await _discordService
+                    .SendVideoNotificationAsync(video);
 
-            // =====================================================
-            // NORMAL VIDEO
-            // =====================================================
+                // IMPORTANT:
+                // mark as sent
+                _liveStateCache[video.VideoId] =
+                    "live_sent";
 
-            string videoMessage =
-                "@everyone\n\n" +
-                "📺 Video mới lên sóng:\n\n" +
-                url;
+                await _liveStateService
+                    .SaveAsync(_liveStateCache);
 
-            await SendToChannelAsync(
-                _config.VideoChannelName,
-                videoMessage,
-                allowedMentions: AllowedMentions.All);
-
-            _logger.LogInformation(
-                "✅ Video notification sent: {Title}",
-                video.Title);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "❌ SendVideoNotificationAsync failed");
-        }
-    }
-
-    // =========================================================
-    // SEND PROMO
-    // =========================================================
-
-    public async Task SendPromoAsync(
-        Embed embed,
-        MessageComponent? components = null)
-    {
-        try
-        {
-            await SendToChannelAsync(
-                _config.PromoChannelName,
-                string.Empty,
-                embed,
-                components);
-
-            _logger.LogInformation(
-                "✅ Promo sent");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "❌ SendPromoAsync failed");
-        }
-    }
-
-    // =========================================================
-    // SEND SAFE
-    // =========================================================
-
-    public async Task SendSafeAsync(
-        ISocketMessageChannel channel,
-        string message,
-        Embed? embed = null,
-        MessageComponent? components = null,
-        AllowedMentions? allowedMentions = null)
-    {
-        try
-        {
-            await channel.SendMessageAsync(
-                text: message,
-                embed: embed,
-                components: components,
-                allowedMentions: allowedMentions);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "❌ SendSafeAsync failed");
-        }
-    }
-
-    // =========================================================
-    // SEND TO CHANNEL
-    // =========================================================
-
-    public async Task SendToChannelAsync(
-        string channelName,
-        string message,
-        Embed? embed = null,
-        MessageComponent? components = null,
-        AllowedMentions? allowedMentions = null)
-    {
-        foreach (var guild in _client.Guilds)
-        {
-            _logger.LogInformation(
-                "📂 Guild: {Guild}",
-                guild.Name);
-
-            var channel =
-                guild.TextChannels.FirstOrDefault(
-                    c => c.Name.Equals(
-                        channelName,
-                        StringComparison.OrdinalIgnoreCase));
-
-            if (channel == null)
-            {
-                _logger.LogWarning(
-                    "Guild {Guild} không có channel #{Channel}",
-                    guild.Name,
-                    channelName);
+                _logger.LogInformation(
+                    "✅ Live notification sent: {VideoId}",
+                    video.VideoId);
 
                 continue;
             }
 
-            _logger.LogInformation(
-                "✅ Found target channel: #{Channel}",
-                channel.Name);
+            // =================================================
+            // NORMAL VIDEO
+            // =================================================
 
-            await SendSafeAsync(
-                channel,
-                message,
-                embed,
-                components,
-                allowedMentions);
+            if (currentState == "none")
+            {
+                // Already notified?
+                if (_liveStateCache
+                    .ContainsKey(video.VideoId))
+                {
+                    _logger.LogInformation(
+                        "⏭ Video already notified: {Title}",
+                        video.Title);
 
-            _logger.LogInformation(
-                "✅ Sent → {Guild} / #{Channel}",
-                guild.Name,
-                channel.Name);
-        }
-    }
+                    continue;
+                }
 
-    // =========================================================
-    // DISCORD LOG
-    // =========================================================
-
-    private Task OnDiscordLogAsync(LogMessage msg)
-    {
-        switch (msg.Severity)
-        {
-            case LogSeverity.Critical:
-            case LogSeverity.Error:
-                _logger.LogError(
-                    msg.Exception,
-                    "[Discord] {Message}",
-                    msg.Message);
-                break;
-
-            case LogSeverity.Warning:
-                _logger.LogWarning(
-                    msg.Exception,
-                    "[Discord] {Message}",
-                    msg.Message);
-                break;
-
-            default:
                 _logger.LogInformation(
-                    "[Discord] {Message}",
-                    msg.Message);
-                break;
+                    "📺 NEW VIDEO: {Title}",
+                    video.Title);
+
+                // Send video message
+                await _discordService
+                    .SendVideoNotificationAsync(video);
+
+                // Mark as sent
+                _liveStateCache[video.VideoId] =
+                    "video_sent";
+
+                await _liveStateService
+                    .SaveAsync(_liveStateCache);
+
+                _logger.LogInformation(
+                    "✅ Video notification sent: {VideoId}",
+                    video.VideoId);
+
+                continue;
+            }
+
+            // =================================================
+            // UPCOMING / OTHER STATES
+            // =================================================
+
+            _logger.LogInformation(
+                "⏭ Skip state={State}: {Title}",
+                currentState,
+                video.Title);
         }
 
-        return Task.CompletedTask;
+        // =====================================================
+        // SAVE LAST VIDEO ID
+        // =====================================================
+
+        _lastKnownVideoId =
+            newIds.Last();
+
+        await _persistence.SaveStateAsync(
+            new BotState
+            {
+                LastVideoId =
+                    _lastKnownVideoId
+            });
+
+        _logger.LogInformation(
+            "💾 Updated last video ID: {Id}",
+            _lastKnownVideoId);
     }
 }
