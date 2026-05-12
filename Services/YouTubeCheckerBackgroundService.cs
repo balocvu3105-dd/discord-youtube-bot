@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using YouTubeDiscordBot.Config;
@@ -9,22 +9,15 @@ namespace YouTubeDiscordBot.Services;
 public class YouTubeCheckerBackgroundService : BackgroundService
 {
     private readonly YouTubeApiService _youtubeApi;
-
     private readonly DiscordService _discordService;
-
     private readonly PersistenceService _persistence;
-
     private readonly LiveStateService _liveStateService;
-
     private readonly BotConfiguration _config;
-
     private readonly ILogger<YouTubeCheckerBackgroundService> _logger;
 
-    private string _lastKnownVideoId =
-        string.Empty;
+    private string _lastKnownVideoId = string.Empty;
 
-    private Dictionary<string, string>
-        _liveStateCache = new();
+    private Dictionary<string, string> _liveStateCache = new();
 
     public YouTubeCheckerBackgroundService(
         YouTubeApiService youtubeApi,
@@ -34,28 +27,13 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         IOptions<BotConfiguration> config,
         ILogger<YouTubeCheckerBackgroundService> logger)
     {
-        _youtubeApi =
-            youtubeApi;
-
-        _discordService =
-            discordService;
-
-        _persistence =
-            persistence;
-
-        _liveStateService =
-            liveStateService;
-
-        _config =
-            config.Value;
-
-        _logger =
-            logger;
+        _youtubeApi = youtubeApi;
+        _discordService = discordService;
+        _persistence = persistence;
+        _liveStateService = liveStateService;
+        _config = config.Value;
+        _logger = logger;
     }
-
-    // =========================================================
-    // MAIN LOOP
-    // =========================================================
 
     protected override async Task ExecuteAsync(
         CancellationToken stoppingToken)
@@ -76,8 +54,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             "Loaded live state: {Count} items",
             _liveStateCache.Count);
 
-        while (!stoppingToken
-               .IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
@@ -103,18 +80,13 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         }
     }
 
-    // =========================================================
-    // CHECK NEW VIDEO / LIVE
-    // =========================================================
-
     private async Task CheckForNewVideoAsync()
     {
         var apiIds =
             await _youtubeApi
                 .GetLatestVideoIdsFromApiAsync();
 
-        if (apiIds == null ||
-            apiIds.Count == 0)
+        if (apiIds == null || apiIds.Count == 0)
         {
             _logger.LogWarning(
                 "⚠️ API returned 0 videos");
@@ -122,23 +94,15 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             return;
         }
 
-        // =====================================================
-        // INIT
-        // =====================================================
-
-        if (string.IsNullOrWhiteSpace(
-                _lastKnownVideoId))
+        if (string.IsNullOrWhiteSpace(_lastKnownVideoId))
         {
-            _lastKnownVideoId =
-                apiIds[0];
+            _lastKnownVideoId = apiIds[0];
 
-            await _persistence
-                .SaveStateAsync(
-                    new BotState
-                    {
-                        LastVideoId =
-                            _lastKnownVideoId
-                    });
+            await _persistence.SaveStateAsync(
+                new BotState
+                {
+                    LastVideoId = _lastKnownVideoId
+                });
 
             _logger.LogInformation(
                 "🔖 Init last video = {Id}",
@@ -147,12 +111,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             return;
         }
 
-        // =====================================================
-        // FIND NEW IDS
-        // =====================================================
-
-        var newIds =
-            new List<string>();
+        var newIds = new List<string>();
 
         foreach (var id in apiIds)
         {
@@ -170,12 +129,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             return;
         }
 
-        // Send oldest → newest
         newIds.Reverse();
-
-        // =====================================================
-        // PROCESS VIDEOS
-        // =====================================================
 
         foreach (var id in newIds)
         {
@@ -195,88 +149,53 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 video.Title,
                 currentState);
 
-            // =================================================
-            // LIVESTREAM
-            // =================================================
+            // Already sent?
+            if (_liveStateCache.ContainsKey(video.VideoId))
+            {
+                _logger.LogInformation(
+                    "⏭ Already notified: {Title}",
+                    video.Title);
 
+                continue;
+            }
+
+            // LIVE
             if (currentState == "live")
             {
-                // Already notified?
-                if (_liveStateCache
-                    .ContainsKey(video.VideoId))
-                {
-                    _logger.LogInformation(
-                        "⏭ Live already notified: {Title}",
-                        video.Title);
-
-                    continue;
-                }
-
                 _logger.LogInformation(
                     "🔴 LIVE DETECTED: {Title}",
                     video.Title);
 
-                // ✅ SEND LIVE MESSAGE
                 await _discordService
-                    .SendLiveNotificationAsync(video);
+                    .SendVideoNotificationAsync(video);
 
-                // ✅ SAVE STATE
                 _liveStateCache[video.VideoId] =
                     "live_sent";
 
                 await _liveStateService
                     .SaveAsync(_liveStateCache);
 
-                _logger.LogInformation(
-                    "✅ Live notification sent: {VideoId}",
-                    video.VideoId);
-
-                // ✅ IMPORTANT
-                // Prevent video flow below
                 continue;
             }
 
-            // =================================================
             // NORMAL VIDEO
-            // =================================================
-
             if (currentState == "none")
             {
-                if (_liveStateCache
-                    .ContainsKey(video.VideoId))
-                {
-                    _logger.LogInformation(
-                        "⏭ Video already notified: {Title}",
-                        video.Title);
-
-                    continue;
-                }
-
                 _logger.LogInformation(
                     "📺 NEW VIDEO: {Title}",
                     video.Title);
 
-                // ✅ SEND VIDEO MESSAGE
                 await _discordService
                     .SendVideoNotificationAsync(video);
 
-                // ✅ SAVE STATE
                 _liveStateCache[video.VideoId] =
                     "video_sent";
 
                 await _liveStateService
                     .SaveAsync(_liveStateCache);
 
-                _logger.LogInformation(
-                    "✅ Video notification sent: {VideoId}",
-                    video.VideoId);
-
                 continue;
             }
-
-            // =================================================
-            // UPCOMING / OTHER STATES
-            // =================================================
 
             _logger.LogInformation(
                 "⏭ Skip state={State}: {Title}",
@@ -284,22 +203,12 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 video.Title);
         }
 
-        // =====================================================
-        // UPDATE LAST VIDEO
-        // =====================================================
-
-        _lastKnownVideoId =
-            newIds.Last();
+        _lastKnownVideoId = newIds.Last();
 
         await _persistence.SaveStateAsync(
             new BotState
             {
-                LastVideoId =
-                    _lastKnownVideoId
+                LastVideoId = _lastKnownVideoId
             });
-
-        _logger.LogInformation(
-            "💾 Updated last video ID: {Id}",
-            _lastKnownVideoId);
     }
 }
