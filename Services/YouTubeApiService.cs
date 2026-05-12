@@ -1,6 +1,4 @@
-﻿using System.ServiceModel.Syndication;
-using System.Xml;
-using Google.Apis.Services;
+﻿using Google.Apis.Services;
 using Google.Apis.YouTube.v3;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -12,139 +10,209 @@ namespace YouTubeDiscordBot.Services;
 public class YouTubeApiService
 {
     private readonly YouTubeService _ytClient;
+
     private readonly BotConfiguration _config;
+
     private readonly ILogger<YouTubeApiService> _logger;
 
     private const int MaxRetry = 3;
 
     public YouTubeApiService(
+        HttpClient httpClient,
         IOptions<BotConfiguration> config,
         ILogger<YouTubeApiService> logger)
     {
         _config = config.Value;
+
         _logger = logger;
+
+        // =====================================================
+        // DEBUG CURRENT API KEY
+        // =====================================================
+
+        if (string.IsNullOrWhiteSpace(
+                _config.YoutubeApiKey))
+        {
+            _logger.LogError(
+                "❌ YouTube API Key is EMPTY");
+        }
+        else
+        {
+            var preview =
+                _config.YoutubeApiKey.Length >= 10
+                    ? _config.YoutubeApiKey[..10]
+                    : _config.YoutubeApiKey;
+
+            _logger.LogInformation(
+                "🔑 Current API Key Prefix: {Key}",
+                preview);
+        }
+
+        // =====================================================
+        // YOUTUBE CLIENT
+        // =====================================================
 
         _ytClient = new YouTubeService(
             new BaseClientService.Initializer
             {
-                ApiKey = _config.YoutubeApiKey,
-                ApplicationName = "YouTubeDiscordBot"
+                ApiKey =
+                    _config.YoutubeApiKey,
+
+                ApplicationName =
+                    "YouTubeDiscordBot"
             });
 
         _ytClient.HttpClient.Timeout =
-            TimeSpan.FromSeconds(200);
+            TimeSpan.FromSeconds(60);
+
+        _logger.LogInformation(
+            "✅ YouTubeApiService initialized");
     }
 
-    // =========================================================
-    // VIDEO VIA RSS (0 quota)
-    // =========================================================
+    // =====================================================
+    // GET LATEST VIDEO IDS
+    // =====================================================
 
-    public async Task<List<string>> GetLatestVideoIdsFromApiAsync()
+    public async Task<List<string>>
+        GetLatestVideoIdsFromApiAsync()
     {
         try
         {
-            var rssUrl =
-                $"https://www.youtube.com/feeds/videos.xml?channel_id={_config.YoutubeChannelId}";
+            _logger.LogInformation(
+                "📡 Fetching uploads playlist...");
 
-            using var reader =
-                XmlReader.Create(rssUrl);
+            // =================================================
+            // STEP 1
+            // GET CHANNEL CONTENT DETAILS
+            // =================================================
 
-            var feed =
-                SyndicationFeed.Load(reader);
+            var channelRequest =
+                _ytClient.Channels.List(
+                    "contentDetails");
 
-            var ids = feed.Items
-                .Take(3)
-                .Select(item =>
-                    item.Id.Split(':').Last())
-                .ToList();
+            channelRequest.Id =
+                _config.YoutubeChannelId;
+
+            var channelResponse =
+                await channelRequest.ExecuteAsync();
+
+            if (channelResponse.Items == null ||
+                channelResponse.Items.Count == 0)
+            {
+                _logger.LogWarning(
+                    "⚠️ Channel not found");
+
+                return new List<string>();
+            }
+
+            var uploadsPlaylistId =
+                channelResponse.Items[0]
+                    .ContentDetails
+                    .RelatedPlaylists
+                    .Uploads;
 
             _logger.LogInformation(
-                "📡 RSS returned {Count} video IDs",
-                ids.Count);
+                "📂 Upload playlist ID: {PlaylistId}",
+                uploadsPlaylistId);
 
-            return ids;
+            // =================================================
+            // STEP 2
+            // GET LATEST VIDEOS
+            // =================================================
+
+            var playlistRequest =
+                _ytClient.PlaylistItems.List(
+                    "snippet");
+
+            playlistRequest.PlaylistId =
+                uploadsPlaylistId;
+
+            playlistRequest.MaxResults = 5;
+
+            var playlistResponse =
+                await playlistRequest.ExecuteAsync();
+
+            if (playlistResponse.Items == null)
+            {
+                _logger.LogWarning(
+                    "⚠️ Playlist returned NULL");
+
+                return new List<string>();
+            }
+
+            var videoIds =
+                playlistResponse.Items
+                    .Select(x =>
+                        x.Snippet
+                            .ResourceId
+                            .VideoId)
+                    .Where(x =>
+                        !string.IsNullOrWhiteSpace(x))
+                    .Distinct()
+                    .ToList();
+
+            _logger.LogInformation(
+                "🎥 Found {Count} latest videos",
+                videoIds.Count);
+
+            foreach (var id in videoIds)
+            {
+                _logger.LogInformation(
+                    "📺 Video ID: {VideoId}",
+                    id);
+            }
+
+            return videoIds;
+        }
+        catch (Google.GoogleApiException ex)
+        {
+            _logger.LogError(
+                ex,
+                """
+                ❌ YouTube API Error
+
+                Message:
+                {Message}
+
+                Error:
+                {Error}
+                """,
+                ex.Message,
+                ex.Error?.Message);
+
+            return new List<string>();
         }
         catch (Exception ex)
         {
             _logger.LogError(
                 ex,
-                "❌ RSS fetch failed");
+                "❌ Failed to fetch latest videos");
 
             return new List<string>();
         }
     }
 
-    // =========================================================
-    // LIVESTREAM VIA API
-    // =========================================================
+    // =====================================================
+    // GET VIDEO DETAIL
+    // =====================================================
 
-    public async Task<VideoInfo?> GetCurrentLiveAsync()
+    public async Task<VideoInfo?>
+        GetVideoByIdAsync(
+            string videoId)
     {
-        for (int attempt = 1; attempt <= MaxRetry; attempt++)
+        for (int attempt = 1;
+             attempt <= MaxRetry;
+             attempt++)
         {
             try
             {
+                _logger.LogInformation(
+                    "🎬 Fetching video detail: {VideoId}",
+                    videoId);
+
                 var request =
-                    _ytClient.Search.List("snippet");
-
-                request.ChannelId =
-                    _config.YoutubeChannelId;
-
-                request.EventType =
-                    SearchResource.ListRequest.EventTypeEnum.Live;
-
-                request.Type =
-                    "video";
-
-                request.MaxResults = 1;
-
-                var response =
-                    await request.ExecuteAsync();
-
-                var item =
-                    response.Items?.FirstOrDefault();
-
-                if (item == null)
-                    return null;
-
-                return await GetVideoByIdAsync(
-                    item.Id.VideoId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "⚠️ GetCurrentLive attempt {Attempt} failed",
-                    attempt);
-
-                if (attempt == MaxRetry)
-                {
-                    _logger.LogError(
-                        "❌ GetCurrentLiveAsync failed after retries");
-
-                    return null;
-                }
-
-                await DelayWithBackoff(attempt);
-            }
-        }
-
-        return null;
-    }
-
-    // =========================================================
-    // VIDEO DETAIL
-    // =========================================================
-
-    public async Task<VideoInfo?> GetVideoByIdAsync(
-        string videoId)
-    {
-        for (int attempt = 1; attempt <= MaxRetry; attempt++)
-        {
-            try
-            {
-                var request =
-                    _ytClient.Videos.List("snippet");
+                    _ytClient.Videos.List(
+                        "snippet");
 
                 request.Id = videoId;
 
@@ -154,6 +222,10 @@ public class YouTubeApiService
                 if (response.Items == null ||
                     response.Items.Count == 0)
                 {
+                    _logger.LogWarning(
+                        "⚠️ Video not found: {VideoId}",
+                        videoId);
+
                     return null;
                 }
 
@@ -161,10 +233,14 @@ public class YouTubeApiService
 
                 var s = v.Snippet;
 
-                return new VideoInfo
+                var result = new VideoInfo
                 {
-                    VideoId = v.Id,
-                    Title = s.Title,
+                    VideoId =
+                        v.Id,
+
+                    Title =
+                        s.Title,
+
                     ThumbnailUrl =
                         s.Thumbnails?.High?.Url ?? "",
 
@@ -177,38 +253,62 @@ public class YouTubeApiService
                     LiveBroadcastContent =
                         s.LiveBroadcastContent
                 };
+
+                _logger.LogInformation(
+                    """
+                    ✅ Video fetched
+
+                    Title: {Title}
+                    Live: {Live}
+                    """,
+                    result.Title,
+                    result.LiveBroadcastContent);
+
+                return result;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(
                     ex,
-                    "⚠️ GetVideo attempt {Attempt} failed: {VideoId}",
+                    """
+                    ⚠️ GetVideoById failed
+
+                    Attempt: {Attempt}
+                    VideoId: {VideoId}
+                    """,
                     attempt,
                     videoId);
 
                 if (attempt == MaxRetry)
                 {
                     _logger.LogError(
-                        "❌ Failed to fetch video after retries: {VideoId}",
+                        """
+                        ❌ Failed after retries
+
+                        VideoId: {VideoId}
+                        """,
                         videoId);
 
                     return null;
                 }
 
-                await DelayWithBackoff(attempt);
+                await DelayWithBackoff(
+                    attempt);
             }
         }
 
         return null;
     }
 
-    // =========================================================
+    // =====================================================
     // HELPER
-    // =========================================================
+    // =====================================================
 
-    private async Task DelayWithBackoff(int attempt)
+    private async Task DelayWithBackoff(
+        int attempt)
     {
-        int delaySeconds = 2 * attempt;
+        int delaySeconds =
+            2 * attempt;
 
         _logger.LogInformation(
             "⏳ Retry after {Delay}s...",
@@ -218,4 +318,3 @@ public class YouTubeApiService
             TimeSpan.FromSeconds(delaySeconds));
     }
 }
-

@@ -14,9 +14,8 @@ var builder = Host.CreateApplicationBuilder(args);
 // CONFIG
 // =========================================================
 
-builder.Services
-    .Configure<BotConfiguration>(
-        builder.Configuration.GetSection("BotConfiguration"));
+builder.Services.Configure<BotConfiguration>(
+    builder.Configuration.GetSection("BotConfiguration"));
 
 // =========================================================
 // LOGGING
@@ -32,7 +31,8 @@ builder.Logging.AddConsole();
 
 builder.Services.AddSingleton<DiscordService>();
 
-builder.Services.AddSingleton<YouTubeApiService>();
+// ✅ FIX
+builder.Services.AddHttpClient<YouTubeApiService>();
 
 builder.Services.AddSingleton<PersistenceService>();
 

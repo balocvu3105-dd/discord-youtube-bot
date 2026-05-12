@@ -16,12 +16,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
     private readonly ILogger<YouTubeCheckerBackgroundService> _logger;
 
     private string _lastKnownVideoId = string.Empty;
-
-    // Persist trạng thái livestream
     private Dictionary<string, string> _liveStateCache = new();
-
-    // Cooldown RAM chống spam livestream
-    private readonly Dictionary<string, DateTime> _liveCooldown = new();
 
     public YouTubeCheckerBackgroundService(
         YouTubeApiService youtubeApi,
@@ -43,288 +38,153 @@ public class YouTubeCheckerBackgroundService : BackgroundService
     // MAIN LOOP
     // =========================================================
 
-    protected override async Task ExecuteAsync(
-        CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation(
-            "🚀 YouTube checker started");
+        _logger.LogInformation("🚀 YouTube checker started");
 
-        // Load state video cũ
-        var state =
-            await _persistence.LoadStateAsync();
+        var state = await _persistence.LoadStateAsync();
+        _lastKnownVideoId = state.LastVideoId ?? string.Empty;
 
-        _lastKnownVideoId =
-            state.LastVideoId ?? string.Empty;
-
-        // Load cache livestream
-        _liveStateCache =
-            await _liveStateService.LoadAsync();
-
-        _logger.LogInformation(
-            "Loaded live state: {Count} items",
-            _liveStateCache.Count);
+        _liveStateCache = await _liveStateService.LoadAsync();
+        _logger.LogInformation("Loaded live state: {Count} items", _liveStateCache.Count);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                // Chỉ dùng RSS — 0 quota, detect được cả video lẫn live
                 await CheckForNewVideoAsync();
-
-                await CheckCurrentLiveAsync();
             }
             catch (Exception ex)
             {
-                _logger.LogError(
-                    ex,
-                    "❌ Main loop error");
+                _logger.LogError(ex, "❌ Main loop error");
             }
 
-            int delay =
-                _config.CheckIntervalSeconds;
+            int delay = _config.CheckIntervalSeconds;
+            _logger.LogInformation("⏱ Next check in {Seconds}s", delay);
 
-            _logger.LogInformation(
-                "⏱ Next check in {Seconds}s",
-                delay);
-
-            await Task.Delay(
-                TimeSpan.FromSeconds(delay),
-                stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(delay), stoppingToken);
         }
     }
 
     // =========================================================
-    // CHECK NEW VIDEO FROM RSS
+    // CHECK NEW VIDEO / LIVE FROM RSS
     // =========================================================
 
     private async Task CheckForNewVideoAsync()
     {
-        var apiIds =
-            await _youtubeApi.GetLatestVideoIdsFromApiAsync();
+        var apiIds = await _youtubeApi.GetLatestVideoIdsFromApiAsync();
 
         if (apiIds == null || apiIds.Count == 0)
         {
-            _logger.LogWarning(
-                "⚠️ RSS returned 0 videos");
-
+            _logger.LogWarning("⚠️ RSS returned 0 videos");
             return;
         }
 
-        // INIT
+        // INIT: lần đầu chạy, chỉ lưu ID, không gửi
         if (string.IsNullOrWhiteSpace(_lastKnownVideoId))
         {
             _lastKnownVideoId = apiIds[0];
-
-            await _persistence.SaveStateAsync(
-                new BotState
-                {
-                    LastVideoId = _lastKnownVideoId
-                });
-
-            _logger.LogInformation(
-                "🔖 Init last video = {Id}",
-                _lastKnownVideoId);
-
+            await _persistence.SaveStateAsync(new BotState { LastVideoId = _lastKnownVideoId });
+            _logger.LogInformation("🔖 Init last video = {Id}", _lastKnownVideoId);
             return;
         }
 
+        // Tìm các ID mới hơn _lastKnownVideoId
         var newIds = new List<string>();
-
         foreach (var id in apiIds)
         {
-            if (id == _lastKnownVideoId)
-                break;
-
+            if (id == _lastKnownVideoId) break;
             newIds.Add(id);
         }
 
         if (newIds.Count == 0)
         {
-            _logger.LogInformation(
-                "✅ No new videos");
-
+            _logger.LogInformation("✅ No new videos");
             return;
         }
 
-        // Gửi từ cũ → mới
+        // Reverse: gửi từ cũ → mới
         newIds.Reverse();
 
         foreach (var id in newIds)
         {
-            var video =
-                await _youtubeApi.GetVideoByIdAsync(id);
+            var video = await _youtubeApi.GetVideoByIdAsync(id);
+            if (video == null) continue;
 
-            if (video == null)
-                continue;
+            string currentState = video.LiveBroadcastContent;
+            _logger.LogInformation("🎥 Detect: {Title} | state={State}", video.Title, currentState);
 
-            string currentState =
-                video.LiveBroadcastContent;
-
-            _liveStateCache.TryGetValue(
-                video.VideoId,
-                out var previousState);
-
-            _logger.LogInformation(
-                "🎥 Detect: {Title} | {State}",
-                video.Title,
-                currentState);
-
-            // =====================================================
+            // -------------------------------------------------
             // LIVESTREAM
-            // =====================================================
-
+            // -------------------------------------------------
             if (currentState == "live")
             {
-                // Cooldown RAM
-                if (_liveCooldown.TryGetValue(
-                        video.VideoId,
-                        out var lastSent))
+                if (IsLiveAlreadyNotified(video.VideoId))
                 {
-                    if ((DateTime.UtcNow - lastSent)
-                        .TotalMinutes < 90)
-                    {
-                        _logger.LogInformation(
-                            "⏳ Live cooldown skip: {Title}",
-                            video.Title);
-
-                        continue;
-                    }
-                }
-
-                // Cache persistent
-                if (previousState != null &&
-                    previousState.StartsWith(
-                        "live_notified_"))
-                {
-                    _logger.LogInformation(
-                        "⏭ Live already notified: {Title}",
-                        video.Title);
-
+                    _logger.LogInformation("⏭ Live already notified: {Title}", video.Title);
                     continue;
                 }
 
-                _logger.LogInformation(
-                    "🔴 LIVE DETECTED: {Title}",
-                    video.Title);
-
-                await _discordService
-                    .SendVideoNotificationAsync(video);
-
-                _liveCooldown[video.VideoId] =
-                    DateTime.UtcNow;
-
-                _liveStateCache[video.VideoId] =
-                    "live_notified_" +
-                    DateTime.UtcNow.ToString("o");
-
+                _logger.LogInformation("🔴 LIVE DETECTED: {Title}", video.Title);
+                await _discordService.SendVideoNotificationAsync(video);
+                MarkLiveNotified(video.VideoId);
                 continue;
             }
 
-            // =====================================================
-            // NORMAL VIDEO
-            // =====================================================
-
+            // -------------------------------------------------
+            // VIDEO THƯỜNG
+            // -------------------------------------------------
             if (currentState == "none")
             {
-                _logger.LogInformation(
-                    "📺 NEW VIDEO: {Title}",
-                    video.Title);
+                if (_liveStateCache.TryGetValue(video.VideoId, out var prevState)
+                    && prevState == "video_sent")
+                {
+                    _logger.LogInformation("⏭ Video already sent: {Title}", video.Title);
+                    continue;
+                }
 
-                await _discordService
-                    .SendVideoNotificationAsync(video);
-
-                _liveStateCache[video.VideoId] =
-                    "video_sent";
+                _logger.LogInformation("📺 NEW VIDEO: {Title}", video.Title);
+                await _discordService.SendVideoNotificationAsync(video);
+                _liveStateCache[video.VideoId] = "video_sent";
+                continue;
             }
+
+            // upcoming hoặc state khác: bỏ qua
+            _logger.LogInformation("⏭ Skip state={State}: {Title}", currentState, video.Title);
         }
 
-        // Save live state
-        await _liveStateService
-            .SaveAsync(_liveStateCache);
+        await _liveStateService.SaveAsync(_liveStateCache);
 
-        // Update last video
-        _lastKnownVideoId =
-            newIds.Last();
-
-        await _persistence.SaveStateAsync(
-            new BotState
-            {
-                LastVideoId = _lastKnownVideoId
-            });
+        _lastKnownVideoId = newIds.Last();
+        await _persistence.SaveStateAsync(new BotState { LastVideoId = _lastKnownVideoId });
     }
 
     // =========================================================
-    // CURRENT LIVE CHECK
+    // HELPERS
     // =========================================================
 
-    private async Task CheckCurrentLiveAsync()
+    private bool IsLiveAlreadyNotified(string videoId)
     {
-        var live =
-            await _youtubeApi.GetCurrentLiveAsync();
+        if (!_liveStateCache.TryGetValue(videoId, out var cachedState))
+            return false;
 
-        if (live == null)
-        {
-            _logger.LogInformation(
-                "📴 No active livestream");
+        if (!cachedState.StartsWith("live_notified_"))
+            return false;
 
-            return;
-        }
+        var timestampStr = cachedState.Replace("live_notified_", "");
 
-        // Persistent cooldown
-        if (_liveStateCache.TryGetValue(
-                live.VideoId,
-                out var cachedState)
-            && cachedState.StartsWith(
-                "live_notified_"))
-        {
-            if (DateTime.TryParse(
-                    cachedState.Replace(
-                        "live_notified_",
-                        ""),
-                    out var notifiedAt))
-            {
-                if ((DateTime.UtcNow - notifiedAt)
-                    .TotalMinutes < 90)
-                {
-                    _logger.LogInformation(
-                        "⏳ Persistent cooldown active: {Title}",
-                        live.Title);
+        if (!DateTime.TryParse(timestampStr, null,
+                System.Globalization.DateTimeStyles.RoundtripKind,
+                out var notifiedAt))
+            return true; // parse fail → coi như đã notify
 
-                    return;
-                }
-            }
-        }
+        return (DateTime.UtcNow - notifiedAt).TotalMinutes < 240; // cooldown 4 tiếng
+    }
 
-        // RAM cooldown
-        if (_liveCooldown.TryGetValue(
-                live.VideoId,
-                out var lastSent))
-        {
-            if ((DateTime.UtcNow - lastSent)
-                .TotalMinutes < 90)
-            {
-                _logger.LogInformation(
-                    "⏳ RAM cooldown active: {Title}",
-                    live.Title);
-
-                return;
-            }
-        }
-
-        _logger.LogInformation(
-            "🔴 LIVE DETECTED via live check: {Title}",
-            live.Title);
-
-        await _discordService
-            .SendVideoNotificationAsync(live);
-
-        _liveCooldown[live.VideoId] =
-            DateTime.UtcNow;
-
-        _liveStateCache[live.VideoId] =
-            "live_notified_" +
-            DateTime.UtcNow.ToString("o");
-
-        await _liveStateService
-            .SaveAsync(_liveStateCache);
+    private void MarkLiveNotified(string videoId)
+    {
+        _liveStateCache[videoId] = "live_notified_" + DateTime.UtcNow.ToString("o");
+        _logger.LogInformation("✅ Marked live_notified: {VideoId}", videoId);
     }
 }
