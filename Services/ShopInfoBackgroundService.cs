@@ -1,8 +1,8 @@
-using Discord.WebSocket;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using YouTubeDiscordBot.Config;
+using Discord;
 
 namespace YouTubeDiscordBot.Services;
 
@@ -13,9 +13,9 @@ public class ShopInfoBackgroundService : BackgroundService
     private readonly BotConfiguration _config;
     private readonly ILogger<ShopInfoBackgroundService> _logger;
 
-    // Lưu MessageId của tin nhắn hiện tại trong mỗi guild
-    // Key = GuildId, Value = MessageId
-    private readonly Dictionary<ulong, ulong> _postedMessageIds = new();
+    // Lưu MessageId của tin nhắn hiện tại để xóa lần sau
+    // Key = ChannelId, Value = MessageId
+    private ulong _postedMessageId = 0;
 
     public ShopInfoBackgroundService(
         ShopInfoService shopInfoService,
@@ -32,9 +32,9 @@ public class ShopInfoBackgroundService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation(
-            "🛒 ShopInfoBackgroundService started. Refresh every {Hours}h to #{Channel}",
+            "🛒 ShopInfoBackgroundService started. Refresh every {Hours}h to channel ID: {ChannelId}",
             _config.ShopInfoRefreshHours,
-            _config.ShopInfoChannelName);
+            _config.ShopInfoChannelId);
 
         // Đợi bot Discord Ready trước
         await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
@@ -58,67 +58,66 @@ public class ShopInfoBackgroundService : BackgroundService
 
     private async Task RefreshShopInfoAsync()
     {
+        // Guard: chưa cấu hình ID
+        if (_config.ShopInfoChannelId == 0)
+        {
+            _logger.LogWarning(
+                "⚠️ ShopInfoChannelId = 0, chưa được cấu hình. Bỏ qua.");
+            return;
+        }
+
+        // Lấy channel trực tiếp bằng ID
+        var channel = _discordService.Client
+            .GetChannel(_config.ShopInfoChannelId) as IMessageChannel;
+
+        if (channel == null)
+        {
+            _logger.LogWarning(
+                "❌ Không tìm thấy channel ID: {ChannelId}. " +
+                "Kiểm tra: bot có trong server? ID đúng chưa? " +
+                "Bot có quyền View Channel + Send Messages không?",
+                _config.ShopInfoChannelId);
+            return;
+        }
+
         var (embed, components) = _shopInfoService.BuildShopOverview();
 
-        // Lấy client Discord từ DiscordService
-        var client = _discordService.Client;
-
-        foreach (var guild in client.Guilds)
+        // Xóa tin nhắn cũ nếu có
+        if (_postedMessageId != 0)
         {
-            // Tìm channel #thong-tin-shop
-            var channel = guild.TextChannels
-                .FirstOrDefault(c => c.Name.Equals(
-                    _config.ShopInfoChannelName,
-                    StringComparison.OrdinalIgnoreCase));
-
-            if (channel == null)
-            {
-                _logger.LogWarning(
-                    "Guild {Guild} không có channel #{Channel}",
-                    guild.Name, _config.ShopInfoChannelName);
-                continue;
-            }
-
-            // Xóa tin nhắn cũ nếu có
-            if (_postedMessageIds.TryGetValue(guild.Id, out var oldMsgId))
-            {
-                try
-                {
-                    var oldMsg = await channel.GetMessageAsync(oldMsgId);
-                    if (oldMsg != null)
-                    {
-                        await channel.DeleteMessageAsync(oldMsgId);
-                        _logger.LogInformation(
-                            "🗑️ Deleted old shop info message in {Guild}", guild.Name);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // Không crash nếu xóa thất bại (vd: tin nhắn đã bị xóa tay)
-                    _logger.LogWarning(ex,
-                        "Could not delete old message in {Guild}", guild.Name);
-                }
-            }
-
-            // Đăng tin mới và lưu MessageId
             try
             {
-                var newMsg = await channel.SendMessageAsync(
-                    embed: embed,
-                    components: components);
-
-                // Lưu MessageId để lần sau xóa được
-                _postedMessageIds[guild.Id] = newMsg.Id;
-
-                _logger.LogInformation(
-                    "✅ Shop info posted in {Guild} / #{Channel} (MsgId: {Id})",
-                    guild.Name, channel.Name, newMsg.Id);
+                var oldMsg = await channel.GetMessageAsync(_postedMessageId);
+                if (oldMsg != null)
+                {
+                    await channel.DeleteMessageAsync(_postedMessageId);
+                    _logger.LogInformation("🗑️ Deleted old shop info message");
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
-                    "❌ Failed to post shop info in {Guild}", guild.Name);
+                // Không crash nếu xóa thất bại (tin nhắn đã bị xóa tay)
+                _logger.LogWarning(ex, "Could not delete old shop info message");
             }
+        }
+
+        // Đăng tin mới và lưu MessageId
+        try
+        {
+            var newMsg = await channel.SendMessageAsync(
+                embed: embed,
+                components: components);
+
+            _postedMessageId = newMsg.Id;
+
+            _logger.LogInformation(
+                "✅ Shop info posted to channel {ChannelId} (MsgId: {MsgId})",
+                _config.ShopInfoChannelId,
+                newMsg.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Failed to post shop info");
         }
     }
 }

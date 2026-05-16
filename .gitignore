@@ -20,7 +20,7 @@ Release/
 Thumbs.db
 
 # Secrets & config
-.env
+
 appsettings.Development.json
 
 # Runtime state

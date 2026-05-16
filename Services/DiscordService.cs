@@ -10,11 +10,9 @@ namespace YouTubeDiscordBot.Services;
 public class DiscordService
 {
     private readonly DiscordSocketClient _client;
-
     public DiscordSocketClient Client => _client;
 
     private readonly BotConfiguration _config;
-
     private readonly ILogger<DiscordService> _logger;
 
     public DiscordService(
@@ -22,7 +20,6 @@ public class DiscordService
         ILogger<DiscordService> logger)
     {
         _config = config.Value;
-
         _logger = logger;
 
         var socketConfig = new DiscordSocketConfig
@@ -30,13 +27,10 @@ public class DiscordService
             GatewayIntents =
                 GatewayIntents.Guilds |
                 GatewayIntents.GuildMessages,
-
             LogGatewayIntentWarnings = false
         };
 
-        _client =
-            new DiscordSocketClient(socketConfig);
-
+        _client = new DiscordSocketClient(socketConfig);
         _client.Log += OnDiscordLogAsync;
     }
 
@@ -48,36 +42,24 @@ public class DiscordService
     {
         try
         {
-            _logger.LogInformation(
-                "Đang kết nối vào Discord...");
+            _logger.LogInformation("Đang kết nối vào Discord...");
 
-            if (string.IsNullOrWhiteSpace(
-                    _config.DiscordToken))
-            {
-                throw new Exception(
-                    "DiscordToken bị trống!");
-            }
+            if (string.IsNullOrWhiteSpace(_config.DiscordToken))
+                throw new Exception("DiscordToken bị trống!");
 
-            _logger.LogInformation(
-                "Token loaded: OK ✅");
+            _logger.LogInformation("Token loaded: OK ✅");
 
-            await _client.LoginAsync(
-                TokenType.Bot,
-                _config.DiscordToken);
-
+            await _client.LoginAsync(TokenType.Bot, _config.DiscordToken);
             await _client.StartAsync();
 
-            var readyTask =
-                new TaskCompletionSource<bool>();
+            var readyTask = new TaskCompletionSource<bool>();
 
             _client.Ready += () =>
             {
                 readyTask.TrySetResult(true);
-
                 _logger.LogInformation(
                     "Đã đăng nhập với tên: {Name}",
                     _client.CurrentUser.Username);
-
                 return Task.CompletedTask;
             };
 
@@ -85,14 +67,11 @@ public class DiscordService
                 readyTask.Task,
                 Task.Delay(TimeSpan.FromSeconds(30)));
 
-            _logger.LogInformation(
-                "Bot Discord đã kết nối.");
+            _logger.LogInformation("Bot Discord đã kết nối.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                ex,
-                "❌ Không thể kết nối Discord");
+            _logger.LogError(ex, "❌ Không thể kết nối Discord");
         }
     }
 
@@ -100,48 +79,39 @@ public class DiscordService
     // SEND VIDEO / LIVE
     // =========================================================
 
-    public async Task SendVideoNotificationAsync(
-        VideoInfo video)
+    public async Task SendVideoNotificationAsync(VideoInfo video)
     {
         try
         {
             string url =
                 $"https://www.youtube.com/watch?v={video.VideoId}";
 
-            // LIVE
             if (video.LiveBroadcastContent == "live")
             {
-                string liveMessage =
-                    "@everyone\n\n" +
-                    "🔴 Tôi đang live rồi anh em ơi:\n\n" +
-                    url;
+                _logger.LogInformation(
+                    "📡 Gửi thông báo LIVE: {Title}",
+                    video.Title);
 
-                await SendToChannelAsync(
-                    _config.LiveChannelName,
-                    liveMessage,
-                    allowedMentions:
-                        AllowedMentions.All);
+                await SendToChannelByIdAsync(
+                    _config.LiveChannelId,
+                    "@everyone\n\n🔴 Tôi đang live rồi anh em ơi:\n\n" + url,
+                    allowedMentions: AllowedMentions.All);
 
                 return;
             }
 
-            // NORMAL VIDEO
-            string videoMessage =
-                "@everyone\n\n" +
-                "📺 Video mới lên sóng:\n\n" +
-                url;
+            _logger.LogInformation(
+                "📡 Gửi thông báo VIDEO: {Title}",
+                video.Title);
 
-            await SendToChannelAsync(
-                _config.VideoChannelName,
-                videoMessage,
-                allowedMentions:
-                    AllowedMentions.All);
+            await SendToChannelByIdAsync(
+                _config.VideoChannelId,
+                "@everyone\n\n📺 Video mới lên sóng:\n\n" + url,
+                allowedMentions: AllowedMentions.All);
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                ex,
-                "❌ SendVideoNotificationAsync failed");
+            _logger.LogError(ex, "❌ SendVideoNotificationAsync failed");
         }
     }
 
@@ -155,97 +125,109 @@ public class DiscordService
     {
         try
         {
-            await SendToChannelAsync(
-                _config.PromoChannelName,
+            await SendToChannelByIdAsync(
+                _config.PromoChannelId,
                 string.Empty,
                 embed,
                 components);
 
-            _logger.LogInformation(
-                "✅ Promo sent");
+            _logger.LogInformation("✅ Promo sent");
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                ex,
-                "❌ SendPromoAsync failed");
+            _logger.LogError(ex, "❌ SendPromoAsync failed");
         }
     }
 
     // =========================================================
-    // SEND TO CHANNEL
+    // SEND SHOP INFO
     // =========================================================
 
-    public async Task SendToChannelAsync(
-        string channelName,
+    public async Task SendShopInfoAsync(
+        Embed embed,
+        MessageComponent? components = null)
+    {
+        try
+        {
+            await SendToChannelByIdAsync(
+                _config.ShopInfoChannelId,
+                string.Empty,
+                embed,
+                components);
+
+            _logger.LogInformation("✅ ShopInfo sent");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ SendShopInfoAsync failed");
+        }
+    }
+
+    // =========================================================
+    // CORE: SEND BY CHANNEL ID
+    // =========================================================
+
+    public async Task SendToChannelByIdAsync(
+        ulong channelId,
         string message,
         Embed? embed = null,
         MessageComponent? components = null,
         AllowedMentions? allowedMentions = null)
     {
-        foreach (var guild in _client.Guilds)
+        // Guard: chưa cấu hình ID
+        if (channelId == 0)
         {
-            var channel =
-                guild.TextChannels.FirstOrDefault(
-                    c => c.Name.Equals(
-                        channelName,
-                        StringComparison.OrdinalIgnoreCase));
-
-            if (channel == null)
-            {
-                _logger.LogWarning(
-                    "Channel not found: {Channel}",
-                    channelName);
-
-                continue;
-            }
-
-            await channel.SendMessageAsync(
-                text: message,
-                embed: embed,
-                components: components,
-                allowedMentions: allowedMentions);
-
-            _logger.LogInformation(
-                "✅ Sent message to #{Channel}",
-                channel.Name);
+            _logger.LogWarning(
+                "⚠️ Channel ID = 0, chưa được cấu hình. Bỏ qua.");
+            return;
         }
+
+        var channel = _client.GetChannel(channelId) as IMessageChannel;
+
+        // Guard: không tìm thấy channel
+        if (channel == null)
+        {
+            _logger.LogWarning(
+                "❌ Không tìm thấy channel ID: {ChannelId}. " +
+                "Kiểm tra: bot có trong server? ID đúng chưa? " +
+                "Bot có quyền View Channel + Send Messages không?",
+                channelId);
+            return;
+        }
+
+        await channel.SendMessageAsync(
+            text: string.IsNullOrEmpty(message) ? null : message,
+            embed: embed,
+            components: components,
+            allowedMentions: allowedMentions);
+
+        _logger.LogInformation(
+            "✅ Sent to channel {ChannelId}",
+            channelId);
     }
 
     // =========================================================
     // DISCORD LOG
     // =========================================================
 
-    private Task OnDiscordLogAsync(
-        LogMessage msg)
+    private Task OnDiscordLogAsync(LogMessage msg)
     {
         switch (msg.Severity)
         {
             case LogSeverity.Error:
             case LogSeverity.Critical:
-
-                _logger.LogError(
-                    msg.Exception,
-                    "[Discord] {Message}",
-                    msg.Message);
-
+                _logger.LogError(msg.Exception,
+                    "[Discord] {Message}", msg.Message);
                 break;
 
             case LogSeverity.Warning:
-
-                _logger.LogWarning(
-                    msg.Exception,
-                    "[Discord] {Message}",
-                    msg.Message);
-
+                _logger.LogWarning(msg.Exception,
+                    "[Discord] {Message}", msg.Message);
                 break;
 
             default:
-
                 _logger.LogInformation(
-                    "[Discord] {Message}",
-                    msg.Message);
-
+                    "[Discord] {Message}", msg.Message);
                 break;
         }
 

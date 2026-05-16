@@ -12,14 +12,15 @@ public class BotConfiguration
         string.Empty;
 
     // =====================================================
-    // YOUTUBE CHANNELS
+    // DISCORD CHANNEL IDs
+    // Lấy bằng cách: Discord → Developer Mode ON
+    // → Chuột phải channel → Copy Channel ID
     // =====================================================
 
-    public string LiveChannelName { get; set; } =
-        "🔴┃livestream";
-
-    public string VideoChannelName { get; set; } =
-        "📺｜video-mới";
+    public ulong LiveChannelId { get; set; }
+    public ulong VideoChannelId { get; set; }
+    public ulong PromoChannelId { get; set; }
+    public ulong ShopInfoChannelId { get; set; }
 
     // =====================================================
     // YOUTUBE
@@ -36,14 +37,9 @@ public class BotConfiguration
     public string StateFilePath { get; set; } =
         "last_video_state.json";
 
-    public ulong DiscordChannelId { get; set; }
-
     // =====================================================
     // PROMO
     // =====================================================
-
-    public string PromoChannelName { get; set; } =
-        "🛒┃khuyến-mãi";
 
     public int PromoIntervalHours { get; set; } = 12;
 
@@ -53,9 +49,6 @@ public class BotConfiguration
     // =====================================================
     // SHOP INFO
     // =====================================================
-
-    public string ShopInfoChannelName { get; set; } =
-        "🛒┃thông-tin-shop";
 
     public int ShopInfoRefreshHours { get; set; } = 24;
 
@@ -95,9 +88,6 @@ public class ShopGameConfig
     public string PromoNote { get; set; } =
         string.Empty;
 
-    // ISO 8601
-    // Ví dụ:
-    // "2026-06-01T23:59:59"
     public string? ExpiresAt { get; set; }
 
     public string HowToTopUp { get; set; } =

@@ -27,9 +27,9 @@ public class PromoBackgroundService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation(
-            "⏰ PromoBackgroundService started. Post every {Hours}h to #{Channel}",
+            "⏰ PromoBackgroundService started. Post every {Hours}h to channel ID: {ChannelId}",
             _config.PromoIntervalHours,
-            _config.PromoChannelName);
+            _config.PromoChannelId);
 
         // Đợi 1 phút để Discord Ready trước khi post lần đầu
         await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
@@ -38,7 +38,6 @@ public class PromoBackgroundService : BackgroundService
         {
             try
             {
-                // Round-robin: Wuthering Waves → Genshin → HSR → ... → lặp lại
                 var (embed, components) = _promoService.BuildNextPromo();
                 await _discordService.SendPromoAsync(embed, components);
             }
