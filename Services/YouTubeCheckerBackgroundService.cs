@@ -61,7 +61,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
     }
 
     // =========================================================
-    // LOOP 1 — Detect video mới (interval 120s như cũ)
+    // LOOP 1 — Detect video mới (interval 120s)
     // =========================================================
 
     private async Task VideoCheckLoopAsync(
@@ -95,7 +95,6 @@ public class YouTubeCheckerBackgroundService : BackgroundService
     private async Task LiveCheckLoopAsync(
         CancellationToken stoppingToken)
     {
-        // Interval riêng cho live check — nhanh hơn video check
         const int liveCheckSeconds = 30;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -116,7 +115,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
     }
 
     // =========================================================
-    // CHECK VIDEO MỚI (như cũ, không đổi logic)
+    // CHECK VIDEO MỚI
     // =========================================================
 
     private async Task CheckForNewVideoAsync()
@@ -130,21 +129,70 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             return;
         }
 
+        // -------------------------------------------------------
         // Lần đầu chạy — chưa có lastKnownVideoId
+        // Check state video mới nhất ngay lúc init
+        // -------------------------------------------------------
         if (string.IsNullOrWhiteSpace(_lastKnownVideoId))
         {
+            var latestVideo =
+                await _youtubeApi.GetVideoByIdAsync(apiIds[0]);
+
+            if (latestVideo != null)
+            {
+                var initState =
+                    latestVideo.LiveBroadcastContent?.ToLower()
+                    ?? "none";
+
+                _logger.LogInformation(
+                    "🔖 Init: {Id} | state={State} | {Title}",
+                    latestVideo.VideoId,
+                    initState,
+                    latestVideo.Title);
+
+                if (initState == "live")
+                {
+                    // Đang live ngay lúc bot khởi động
+                    _logger.LogInformation(
+                        "🔴 LIVE ON STARTUP: {Title}",
+                        latestVideo.Title);
+
+                    await _discordService
+                        .SendVideoNotificationAsync(latestVideo);
+
+                    _liveStateCache[latestVideo.VideoId] =
+                        "live_sent";
+
+                    await _liveStateService
+                        .SaveAsync(_liveStateCache);
+                }
+                else if (initState == "upcoming")
+                {
+                    // Scheduled live → LiveCheckLoop theo dõi tiếp
+                    _logger.LogInformation(
+                        "🕐 UPCOMING ON STARTUP: {Title}",
+                        latestVideo.Title);
+
+                    _liveStateCache[latestVideo.VideoId] =
+                        "upcoming";
+
+                    await _liveStateService
+                        .SaveAsync(_liveStateCache);
+                }
+                // "none" = video thường đã đăng từ trước, bỏ qua
+            }
+
             _lastKnownVideoId = apiIds[0];
 
             await _persistence.SaveStateAsync(
                 new BotState { LastVideoId = _lastKnownVideoId });
 
-            _logger.LogInformation(
-                "🔖 Init last video = {Id}", _lastKnownVideoId);
-
             return;
         }
 
+        // -------------------------------------------------------
         // Tìm các video mới hơn lastKnownVideoId
+        // -------------------------------------------------------
         var newIds = new List<string>();
         foreach (var id in apiIds)
         {
@@ -162,10 +210,13 @@ public class YouTubeCheckerBackgroundService : BackgroundService
 
         foreach (var id in newIds)
         {
-            var video = await _youtubeApi.GetVideoByIdAsync(id);
+            var video =
+                await _youtubeApi.GetVideoByIdAsync(id);
+
             if (video == null) continue;
 
-            var state = video.LiveBroadcastContent?.ToLower() ?? "none";
+            var state =
+                video.LiveBroadcastContent?.ToLower() ?? "none";
 
             _logger.LogInformation(
                 "🎥 Detect: {Title} | state={State}",
@@ -184,7 +235,9 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 _logger.LogInformation(
                     "🔴 LIVE DETECTED: {Title}", video.Title);
 
-                await _discordService.SendVideoNotificationAsync(video);
+                await _discordService
+                    .SendVideoNotificationAsync(video);
+
                 _liveStateCache[video.VideoId] = "live_sent";
                 await _liveStateService.SaveAsync(_liveStateCache);
             }
@@ -193,15 +246,17 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 _logger.LogInformation(
                     "📺 NEW VIDEO: {Title}", video.Title);
 
-                await _discordService.SendVideoNotificationAsync(video);
+                await _discordService
+                    .SendVideoNotificationAsync(video);
+
                 _liveStateCache[video.VideoId] = "video_sent";
                 await _liveStateService.SaveAsync(_liveStateCache);
             }
             else if (state == "upcoming")
             {
-                // Chưa live, lưu vào cache để LiveCheckLoop theo dõi tiếp
                 _logger.LogInformation(
-                    "🕐 UPCOMING: {Title} — sẽ theo dõi tiếp", video.Title);
+                    "🕐 UPCOMING: {Title} — sẽ theo dõi tiếp",
+                    video.Title);
 
                 _liveStateCache[video.VideoId] = "upcoming";
                 await _liveStateService.SaveAsync(_liveStateCache);
@@ -209,19 +264,17 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         }
 
         _lastKnownVideoId = newIds.Last();
+
         await _persistence.SaveStateAsync(
             new BotState { LastVideoId = _lastKnownVideoId });
     }
 
     // =========================================================
-    // CHECK UPCOMING → LIVE
-    // Mỗi 30s, lấy tất cả video đang "upcoming" trong cache
-    // và poll YouTube xem có chuyển sang "live" chưa
+    // CHECK UPCOMING → LIVE (chạy mỗi 30s)
     // =========================================================
 
     private async Task CheckUpcomingForLiveAsync()
     {
-        // Lấy tất cả video đang chờ live
         var upcomingIds = _liveStateCache
             .Where(kv => kv.Value == "upcoming")
             .Select(kv => kv.Key)
@@ -236,10 +289,13 @@ public class YouTubeCheckerBackgroundService : BackgroundService
 
         foreach (var id in upcomingIds)
         {
-            var video = await _youtubeApi.GetVideoByIdAsync(id);
+            var video =
+                await _youtubeApi.GetVideoByIdAsync(id);
+
             if (video == null) continue;
 
-            var state = video.LiveBroadcastContent?.ToLower() ?? "none";
+            var state =
+                video.LiveBroadcastContent?.ToLower() ?? "none";
 
             _logger.LogInformation(
                 "🔍 [LiveCheck] {Id} → state={State}", id, state);
@@ -249,21 +305,25 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 _logger.LogInformation(
                     "🔴 LIVE NOW: {Title}", video.Title);
 
-                await _discordService.SendVideoNotificationAsync(video);
+                await _discordService
+                    .SendVideoNotificationAsync(video);
+
                 _liveStateCache[video.VideoId] = "live_sent";
                 await _liveStateService.SaveAsync(_liveStateCache);
             }
             else if (state == "none")
             {
-                // Live đã kết thúc mà chưa kịp gửi — gửi như video thường
+                // Live kết thúc mà chưa kịp gửi
                 _logger.LogInformation(
                     "📺 LIVE ENDED (missed): {Title}", video.Title);
 
-                await _discordService.SendVideoNotificationAsync(video);
+                await _discordService
+                    .SendVideoNotificationAsync(video);
+
                 _liveStateCache[video.VideoId] = "video_sent";
                 await _liveStateService.SaveAsync(_liveStateCache);
             }
-            // Nếu vẫn "upcoming" thì giữ nguyên, check lại lần sau
+            // "upcoming" → giữ nguyên, check lại lần sau
         }
     }
 }
