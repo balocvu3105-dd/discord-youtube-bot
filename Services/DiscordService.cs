@@ -86,28 +86,65 @@ public class DiscordService
             string url =
                 $"https://www.youtube.com/watch?v={video.VideoId}";
 
+            // LIVE
             if (video.LiveBroadcastContent == "live")
             {
                 _logger.LogInformation(
                     "📡 Gửi thông báo LIVE: {Title}",
                     video.Title);
 
+                // Nếu có config LiveRoleId → tag role đó
+                // Nếu không (= 0) → không tag ai cả
+                // Lý do dùng ulong: Discord ID là số nguyên 64-bit rất lớn
+                string mention = _config.LiveRoleId != 0
+                    ? $"<@&{_config.LiveRoleId}>"
+                    : string.Empty;
+
+                // AllowedMentions kiểm soát Discord có THỰC SỰ ping không
+                // Dù text có <@&123> nhưng nếu không khai báo ở đây → Discord bỏ qua
+                var allowedMentions = _config.LiveRoleId != 0
+                    ? new AllowedMentions
+                    {
+                        RoleIds = new List<ulong> { _config.LiveRoleId }
+                    }
+                    : AllowedMentions.None;
+
+                string liveMessage =
+                    (mention.Length > 0 ? mention + "\n\n" : "") +
+                    "🔴 Tôi đang live rồi anh em ơi:\n\n" + url;
+
                 await SendToChannelByIdAsync(
                     _config.LiveChannelId,
-                    "@everyone\n\n🔴 Tôi đang live rồi anh em ơi:\n\n" + url,
-                    allowedMentions: AllowedMentions.All);
+                    liveMessage,
+                    allowedMentions: allowedMentions);
 
                 return;
             }
 
+            // NORMAL VIDEO
             _logger.LogInformation(
                 "📡 Gửi thông báo VIDEO: {Title}",
                 video.Title);
 
+            string videoMention = _config.VideoRoleId != 0
+                ? $"<@&{_config.VideoRoleId}>"
+                : string.Empty;
+
+            var videoAllowedMentions = _config.VideoRoleId != 0
+                ? new AllowedMentions
+                {
+                    RoleIds = new List<ulong> { _config.VideoRoleId }
+                }
+                : AllowedMentions.None;
+
+            string videoMessage =
+                (videoMention.Length > 0 ? videoMention + "\n\n" : "") +
+                "📺 Video mới lên sóng:\n\n" + url;
+
             await SendToChannelByIdAsync(
                 _config.VideoChannelId,
-                "@everyone\n\n📺 Video mới lên sóng:\n\n" + url,
-                allowedMentions: AllowedMentions.All);
+                videoMessage,
+                allowedMentions: videoAllowedMentions);
         }
         catch (Exception ex)
         {

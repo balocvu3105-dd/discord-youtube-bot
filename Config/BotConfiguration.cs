@@ -23,6 +23,16 @@ public class BotConfiguration
     public ulong ShopInfoChannelId { get; set; }
 
     // =====================================================
+    // DISCORD ROLE IDs
+    // Lấy bằng cách: Discord → Developer Mode ON
+    // → Server Settings → Roles → Chuột phải role → Copy Role ID
+    // Để 0 = không tag role (bot sẽ bỏ qua mention)
+    // =====================================================
+
+    public ulong LiveRoleId { get; set; } = 0;
+    public ulong VideoRoleId { get; set; } = 0;
+
+    // =====================================================
     // YOUTUBE
     // =====================================================
 
