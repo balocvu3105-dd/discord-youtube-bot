@@ -83,68 +83,59 @@ public class DiscordService
     {
         try
         {
-            string url =
-                $"https://www.youtube.com/watch?v={video.VideoId}";
+            string url = $"https://www.youtube.com/watch?v={video.VideoId}";
 
-            // LIVE
-            if (video.LiveBroadcastContent == "live")
-            {
-                _logger.LogInformation(
-                    "📡 Gửi thông báo LIVE: {Title}",
-                    video.Title);
+            // ── Chọn đúng RoleId theo loại thông báo ──────────────────
+            ulong roleId = video.LiveBroadcastContent == "live"
+                ? _config.LiveRoleId
+                : _config.VideoRoleId;
 
-                // Nếu có config LiveRoleId → tag role đó
-                // Nếu không (= 0) → không tag ai cả
-                // Lý do dùng ulong: Discord ID là số nguyên 64-bit rất lớn
-                string mention = _config.LiveRoleId != 0
-                    ? $"<@&{_config.LiveRoleId}>"
-                    : string.Empty;
-
-                // AllowedMentions kiểm soát Discord có THỰC SỰ ping không
-                // Dù text có <@&123> nhưng nếu không khai báo ở đây → Discord bỏ qua
-                var allowedMentions = _config.LiveRoleId != 0
-                    ? new AllowedMentions
-                    {
-                        RoleIds = new List<ulong> { _config.LiveRoleId }
-                    }
-                    : AllowedMentions.None;
-
-                string liveMessage =
-                    (mention.Length > 0 ? mention + "\n\n" : "") +
-                    "🔴 Tôi đang live rồi anh em ơi:\n\n" + url;
-
-                await SendToChannelByIdAsync(
-                    _config.LiveChannelId,
-                    liveMessage,
-                    allowedMentions: allowedMentions);
-
-                return;
-            }
-
-            // NORMAL VIDEO
-            _logger.LogInformation(
-                "📡 Gửi thông báo VIDEO: {Title}",
-                video.Title);
-
-            string videoMention = _config.VideoRoleId != 0
-                ? $"<@&{_config.VideoRoleId}>"
+            // ── Tạo mention text ───────────────────────────────────────
+            // roleId != 0  → tag role đó: <@&123456>
+            // roleId == 0  → không tag ai, string rỗng
+            string mention = roleId != 0
+                ? $"<@&{roleId}>"
                 : string.Empty;
 
-            var videoAllowedMentions = _config.VideoRoleId != 0
+            // ── AllowedMentions: kiểm soát Discord có THỰC SỰ ping không
+            // Quan trọng: phải khai báo đúng ở đây,
+            // nếu không Discord sẽ bỏ qua dù text có <@&...>
+            // ParseEveryone = false → chặn @everyone và @here tuyệt đối
+            var allowedMentions = roleId != 0
                 ? new AllowedMentions
                 {
-                    RoleIds = new List<ulong> { _config.VideoRoleId }
+                    RoleIds = new List<ulong> { roleId },
+                    // Quan trọng: tắt hẳn @everyone / @here
+                    AllowedTypes = AllowedMentionTypes.Roles
                 }
-                : AllowedMentions.None;
+                : new AllowedMentions
+                {
+                    AllowedTypes = AllowedMentionTypes.None // không ping ai
+                };
 
-            string videoMessage =
-                (videoMention.Length > 0 ? videoMention + "\n\n" : "") +
-                "📺 Video mới lên sóng:\n\n" + url;
+            // ── Nội dung message theo loại ─────────────────────────────
+            string messageBody = video.LiveBroadcastContent == "live"
+                ? "🔴 Tôi đang live rồi anh em ơi:\n\n" + url
+                : "📺 Video mới lên sóng:\n\n" + url;
+
+            string finalMessage = mention.Length > 0
+                ? mention + "\n\n" + messageBody
+                : messageBody;
+
+            // ── Log để debug ───────────────────────────────────────────
+            _logger.LogInformation(
+                "📡 Gửi [{Type}] RoleId={RoleId} | {Title}",
+                video.LiveBroadcastContent, roleId, video.Title);
+
+            // ── Gửi vào đúng channel ───────────────────────────────────
+            ulong channelId = video.LiveBroadcastContent == "live"
+                ? _config.LiveChannelId
+                : _config.VideoChannelId;
 
             await SendToChannelByIdAsync(
-                _config.VideoChannelId,
-                videoMessage,
-                allowedMentions: videoAllowedMentions);
+                channelId,
+                finalMessage,
+                allowedMentions: allowedMentions);
         }
         catch (Exception ex)
         {
