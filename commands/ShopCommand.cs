@@ -5,13 +5,13 @@ using YouTubeDiscordBot.Services;
 namespace YouTubeDiscordBot.Commands;
 
 // Module chứa slash commands liên quan đến shop
-public class ShopCommand : InteractionModuleBase<SocketInteractionContext>
+public class ShopCommand : InteractionModuleBase
 {
-    private readonly ShopInfoService _shopInfoService;
+    private readonly ShopService _shopService;
 
-    public ShopCommand(ShopInfoService shopInfoService)
+    public ShopCommand(ShopService shopService)
     {
-        _shopInfoService = shopInfoService;
+        _shopService = shopService;
     }
 
     // ── SLASH COMMAND: /shop ──────────────────────────────────────────────
@@ -25,7 +25,7 @@ public class ShopCommand : InteractionModuleBase<SocketInteractionContext>
         try
         {
             var (embed, components) =
-                _shopInfoService.BuildShopOverview();
+                _shopService.BuildOverview();
 
             // Đăng vào channel hiện tại
             await Context.Channel.SendMessageAsync(
@@ -43,4 +43,5 @@ public class ShopCommand : InteractionModuleBase<SocketInteractionContext>
                 ephemeral: true);
         }
     }
+
 }

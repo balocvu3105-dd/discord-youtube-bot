@@ -10,30 +10,25 @@ namespace YouTubeDiscordBot.Services;
 public class DiscordService
 {
     private readonly DiscordSocketClient _client;
+
     public DiscordSocketClient Client => _client;
 
     private readonly BotConfiguration _config;
     private readonly ILogger<DiscordService> _logger;
 
     public DiscordService(
-        IOptions<BotConfiguration> config,
-        ILogger<DiscordService> logger)
+    DiscordSocketClient client,
+    IOptions<BotConfiguration> config,
+    ILogger<DiscordService> logger)
     {
+        _client = client;
+
         _config = config.Value;
+
         _logger = logger;
 
-        var socketConfig = new DiscordSocketConfig
-        {
-            GatewayIntents =
-                GatewayIntents.Guilds |
-                GatewayIntents.GuildMessages,
-            LogGatewayIntentWarnings = false
-        };
-
-        _client = new DiscordSocketClient(socketConfig);
         _client.Log += OnDiscordLogAsync;
     }
-
     // =========================================================
     // CONNECT
     // =========================================================
@@ -42,24 +37,30 @@ public class DiscordService
     {
         try
         {
-            _logger.LogInformation("Đang kết nối vào Discord...");
+            _logger.LogInformation(
+                "Đang kết nối Discord...");
 
             if (string.IsNullOrWhiteSpace(_config.DiscordToken))
-                throw new Exception("DiscordToken bị trống!");
+                throw new Exception(
+                    "DiscordToken bị trống!");
 
-            _logger.LogInformation("Token loaded: OK ✅");
+            await _client.LoginAsync(
+                TokenType.Bot,
+                _config.DiscordToken);
 
-            await _client.LoginAsync(TokenType.Bot, _config.DiscordToken);
             await _client.StartAsync();
 
-            var readyTask = new TaskCompletionSource<bool>();
+            var readyTask =
+                new TaskCompletionSource<bool>();
 
             _client.Ready += () =>
             {
                 readyTask.TrySetResult(true);
+
                 _logger.LogInformation(
-                    "Đã đăng nhập với tên: {Name}",
+                    "✅ Đăng nhập Discord thành công: {Name}",
                     _client.CurrentUser.Username);
+
                 return Task.CompletedTask;
             };
 
@@ -67,132 +68,116 @@ public class DiscordService
                 readyTask.Task,
                 Task.Delay(TimeSpan.FromSeconds(30)));
 
-            _logger.LogInformation("Bot Discord đã kết nối.");
+            _logger.LogInformation(
+                "✅ Discord connected");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Không thể kết nối Discord");
+            _logger.LogError(
+                ex,
+                "❌ Không thể kết nối Discord");
         }
     }
 
     // =========================================================
-    // SEND VIDEO / LIVE
+    // VIDEO / LIVE NOTIFICATION
     // =========================================================
 
-    public async Task SendVideoNotificationAsync(VideoInfo video)
+    public async Task SendVideoNotificationAsync(
+        VideoInfo video)
     {
         try
         {
-            string url = $"https://www.youtube.com/watch?v={video.VideoId}";
+            string url =
+                $"https://www.youtube.com/watch?v={video.VideoId}";
 
-            // ── Chọn đúng RoleId theo loại thông báo ──────────────────
-            ulong roleId = video.LiveBroadcastContent == "live"
-                ? _config.LiveRoleId
-                : _config.VideoRoleId;
+            ulong roleId =
+                video.LiveBroadcastContent == "live"
+                    ? _config.LiveRoleId
+                    : _config.VideoRoleId;
 
-            // ── Tạo mention text ───────────────────────────────────────
-            // roleId != 0  → tag role đó: <@&123456>
-            // roleId == 0  → không tag ai, string rỗng
-            string mention = roleId != 0
-                ? $"<@&{roleId}>"
-                : string.Empty;
+            string mention =
+                roleId != 0
+                    ? $"<@&{roleId}>"
+                    : string.Empty;
 
-            // ── AllowedMentions: kiểm soát Discord có THỰC SỰ ping không
-            // Quan trọng: phải khai báo đúng ở đây,
-            // nếu không Discord sẽ bỏ qua dù text có <@&...>
-            // ParseEveryone = false → chặn @everyone và @here tuyệt đối
-            var allowedMentions = roleId != 0
-                ? new AllowedMentions
-                {
-                    RoleIds = new List<ulong> { roleId },
-                    // Quan trọng: tắt hẳn @everyone / @here
-                    AllowedTypes = AllowedMentionTypes.Roles
-                }
-                : new AllowedMentions
-                {
-                    AllowedTypes = AllowedMentionTypes.None // không ping ai
-                };
+            // FIX:
+            // Không dùng AllowedTypes.Roles cùng lúc với RoleIds
+            var allowedMentions =
+                roleId != 0
+                    ? new AllowedMentions
+                    {
+                        RoleIds = new List<ulong>
+                        {
+                        roleId
+                        }
+                    }
+                    : new AllowedMentions
+                    {
+                        AllowedTypes = AllowedMentionTypes.None
+                    };
 
-            // ── Nội dung message theo loại ─────────────────────────────
-            string messageBody = video.LiveBroadcastContent == "live"
-                ? "🔴 Tôi đang live rồi anh em ơi:\n\n" + url
-                : "📺 Video mới lên sóng:\n\n" + url;
+            string messageBody =
+                video.LiveBroadcastContent == "live"
+                    ? "🔴 Tôi đang live rồi anh em ơi:\n\n" + url
+                    : "📺 Video mới lên sóng:\n\n" + url;
 
-            string finalMessage = mention.Length > 0
-                ? mention + "\n\n" + messageBody
-                : messageBody;
+            string finalMessage =
+                mention.Length > 0
+                    ? mention + "\n\n" + messageBody
+                    : messageBody;
 
-            // ── Log để debug ───────────────────────────────────────────
-            _logger.LogInformation(
-                "📡 Gửi [{Type}] RoleId={RoleId} | {Title}",
-                video.LiveBroadcastContent, roleId, video.Title);
-
-            // ── Gửi vào đúng channel ───────────────────────────────────
-            ulong channelId = video.LiveBroadcastContent == "live"
-                ? _config.LiveChannelId
-                : _config.VideoChannelId;
+            ulong channelId =
+                video.LiveBroadcastContent == "live"
+                    ? _config.LiveChannelId
+                    : _config.VideoChannelId;
 
             await SendToChannelByIdAsync(
                 channelId,
                 finalMessage,
                 allowedMentions: allowedMentions);
+
+            _logger.LogInformation(
+                "✅ Video notification sent: {Title}",
+                video.Title);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ SendVideoNotificationAsync failed");
+            _logger.LogError(
+                ex,
+                "❌ SendVideoNotificationAsync failed");
         }
     }
 
     // =========================================================
-    // SEND PROMO
+    // SHOP MESSAGE
     // =========================================================
 
-    public async Task SendPromoAsync(
+    public async Task SendShopAsync(
         Embed embed,
         MessageComponent? components = null)
     {
         try
         {
             await SendToChannelByIdAsync(
-                _config.PromoChannelId,
+                _config.ShopChannelId,
                 string.Empty,
                 embed,
                 components);
 
-            _logger.LogInformation("✅ Promo sent");
+            _logger.LogInformation(
+                "✅ Shop message sent");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ SendPromoAsync failed");
+            _logger.LogError(
+                ex,
+                "❌ SendShopAsync failed");
         }
     }
 
     // =========================================================
-    // SEND SHOP INFO
-    // =========================================================
-
-    public async Task SendShopInfoAsync(
-        Embed embed,
-        MessageComponent? components = null)
-    {
-        try
-        {
-            await SendToChannelByIdAsync(
-                _config.ShopInfoChannelId,
-                string.Empty,
-                embed,
-                components);
-
-            _logger.LogInformation("✅ ShopInfo sent");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ SendShopInfoAsync failed");
-        }
-    }
-
-    // =========================================================
-    // CORE: SEND BY CHANNEL ID
+    // CORE SEND METHOD
     // =========================================================
 
     public async Task SendToChannelByIdAsync(
@@ -202,35 +187,40 @@ public class DiscordService
         MessageComponent? components = null,
         AllowedMentions? allowedMentions = null)
     {
-        // Guard: chưa cấu hình ID
+        // Guard: channel chưa cấu hình
         if (channelId == 0)
         {
             _logger.LogWarning(
-                "⚠️ Channel ID = 0, chưa được cấu hình. Bỏ qua.");
+                "⚠️ Channel ID = 0, bỏ qua gửi message");
+
             return;
         }
 
-        var channel = _client.GetChannel(channelId) as IMessageChannel;
+        var channel =
+            _client.GetChannel(channelId)
+                as IMessageChannel;
 
         // Guard: không tìm thấy channel
         if (channel == null)
         {
             _logger.LogWarning(
-                "❌ Không tìm thấy channel ID: {ChannelId}. " +
-                "Kiểm tra: bot có trong server? ID đúng chưa? " +
-                "Bot có quyền View Channel + Send Messages không?",
+                "❌ Không tìm thấy channel ID: {ChannelId}",
                 channelId);
+
             return;
         }
 
         await channel.SendMessageAsync(
-            text: string.IsNullOrEmpty(message) ? null : message,
+            text: string.IsNullOrWhiteSpace(message)
+                ? null
+                : message,
+
             embed: embed,
             components: components,
             allowedMentions: allowedMentions);
 
         _logger.LogInformation(
-            "✅ Sent to channel {ChannelId}",
+            "✅ Sent message to channel {ChannelId}",
             channelId);
     }
 
@@ -242,23 +232,35 @@ public class DiscordService
     {
         switch (msg.Severity)
         {
-            case LogSeverity.Error:
             case LogSeverity.Critical:
-                _logger.LogError(msg.Exception,
-                    "[Discord] {Message}", msg.Message);
+            case LogSeverity.Error:
+
+                _logger.LogError(
+                    msg.Exception,
+                    "[Discord] {Message}",
+                    msg.Message);
+
                 break;
 
             case LogSeverity.Warning:
-                _logger.LogWarning(msg.Exception,
-                    "[Discord] {Message}", msg.Message);
+
+                _logger.LogWarning(
+                    msg.Exception,
+                    "[Discord] {Message}",
+                    msg.Message);
+
                 break;
 
             default:
+
                 _logger.LogInformation(
-                    "[Discord] {Message}", msg.Message);
+                    "[Discord] {Message}",
+                    msg.Message);
+
                 break;
         }
 
         return Task.CompletedTask;
     }
+
 }
