@@ -129,7 +129,7 @@ docker run --env-file .env youtube-discord-bot
 
 
 /refreshshop
-```
+
 
 Force refresh LDShop promotions.
 
@@ -142,7 +142,7 @@ Runtime state is stored in:
 
 data/last_video_state.json
 data/live_state.json
-```
+
 
 These files are ignored by git.
 
@@ -152,9 +152,9 @@ These files are ignored by git.
 
 Logs are written to:
 
-```txt
+
 logs/
-```
+
 
 ---
 
