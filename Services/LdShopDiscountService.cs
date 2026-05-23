@@ -42,6 +42,8 @@ public class LdShopDiscountService
 
     /// <summary>
     /// Warm cache cho tất cả games trước khi build embeds.
+    /// skuLabelId vẫn nhận vào để không break interface,
+    /// nhưng không dùng trong payload — lấy toàn bộ SKU để tính đúng.
     /// </summary>
     public async Task WarmCacheAsync(IEnumerable<(int commodityId, int skuLabelId)> games)
     {
@@ -61,16 +63,22 @@ public class LdShopDiscountService
 
     /// <summary>
     /// Fetch trực tiếp từ API (không qua cache).
+    ///
+    /// FIX: Bỏ skuLabelId khỏi payload.
+    /// Lý do: skuLabelId lọc theo nhóm SKU quá hẹp → chỉ lấy được
+    /// một phần nhỏ SKU → average discount bị sai lệch so với % hiển thị trên web.
+    /// Lấy toàn bộ SKU (không filter) → tính average đúng với web.
     /// </summary>
     public async Task<double?> FetchDiscountAsync(int commodityId, int skuLabelId)
     {
         try
         {
+            // FIX: Không truyền skuLabelId vào payload
+            // để lấy toàn bộ SKU của game, tính average discount chính xác
             var payload = new
             {
                 page = new { current = 1, size = 100 },
-                commodityId,
-                skuLabelId
+                commodityId
             };
 
             var json = JsonSerializer.Serialize(payload);
@@ -92,6 +100,8 @@ public class LdShopDiscountService
             if (result?.Data is null || result.Data.Count == 0)
                 return null;
 
+            // Chỉ lấy SKU đang bán (stockStatus=1), không phải promo đặc biệt (promotion=0),
+            // và có đủ dữ liệu giá để tính %
             var validItems = result.Data
                 .Where(x => x.Promotion == 0
                          && x.StockStatus == 1
@@ -105,14 +115,17 @@ public class LdShopDiscountService
                 return null;
             }
 
-            var avgDiscount = validItems
-                .Average(x => x.TotalDiscount!.Amount / x.SellPrice!.Amount * 100);
+            // Lấy discount cao nhất thay vì average
+            // Lý do: web LDShop hiển thị mức giảm cao nhất của game,
+            // không phải average của tất cả mệnh giá
+            var maxDiscount = validItems
+                .Max(x => x.TotalDiscount!.Amount / x.SellPrice!.Amount * 100);
 
             _logger.LogInformation(
-                "Discount fetched — commodityId={Id}, items={Count}, avg={Pct:F1}%",
-                commodityId, validItems.Count, avgDiscount);
+                "Discount fetched — commodityId={Id}, items={Count}, max={Pct:F1}%",
+                commodityId, validItems.Count, maxDiscount);
 
-            return Math.Round(avgDiscount, 1);
+            return Math.Round(maxDiscount, 1);
         }
         catch (Exception ex)
         {
