@@ -51,7 +51,7 @@ Production-ready Discord bot built with .NET for:
 
 # Project Structure
 
-
+```txt
 Background/     -> background workers
 Commands/       -> slash commands
 Config/         -> configuration models
@@ -59,7 +59,7 @@ Models/         -> data models
 Services/       -> business logic/services
 data/           -> runtime state storage
 logs/           -> runtime logs
-
+```
 
 ---
 
@@ -67,9 +67,10 @@ logs/           -> runtime logs
 
 ## Clone Repository
 
-
+```bash
 git clone https://github.com/balocvu3105-dd/discord-youtube-bot.git
 cd discord-youtube-bot
+```
 
 ---
 
@@ -77,16 +78,16 @@ cd discord-youtube-bot
 
 Create `.env`
 
-
+```env
 BotConfiguration__DiscordToken=YOUR_DISCORD_TOKEN
 BotConfiguration__YoutubeApiKey=YOUR_YOUTUBE_API_KEY
-
+```
 
 ---
 
 # appsettings.json
 
-
+```json
 {
   "BotConfiguration": {
     "YoutubeChannelId": "YOUR_CHANNEL_ID",
@@ -94,16 +95,16 @@ BotConfiguration__YoutubeApiKey=YOUR_YOUTUBE_API_KEY
     "LiveChannelId": 123456789
   }
 }
-
+```
 
 ---
 
 # Run Locally
 
-
+```bash
 dotnet restore
 dotnet run
-
+```
 
 ---
 
@@ -111,15 +112,15 @@ dotnet run
 
 ## Build
 
-
+```bash
 docker build -t youtube-discord-bot .
-
+```
 
 ## Run
 
-
+```bash
 docker run --env-file .env youtube-discord-bot
-
+```
 
 ---
 
@@ -127,9 +128,9 @@ docker run --env-file .env youtube-discord-bot
 
 ## Refresh Shop
 
-
+```txt
 /refreshshop
-
+```
 
 Force refresh LDShop promotions.
 
@@ -139,10 +140,10 @@ Force refresh LDShop promotions.
 
 Runtime state is stored in:
 
-
+```txt
 data/last_video_state.json
 data/live_state.json
-
+```
 
 These files are ignored by git.
 
@@ -152,9 +153,9 @@ These files are ignored by git.
 
 Logs are written to:
 
-
+```txt
 logs/
-
+```
 
 ---
 
@@ -179,3 +180,5 @@ logs/
 ---
 
 # License
+
+MIT
