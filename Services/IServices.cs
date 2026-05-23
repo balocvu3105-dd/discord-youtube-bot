@@ -13,46 +13,47 @@ namespace YouTubeDiscordBot.Services;
 /// <summary>Quản lý kết nối Discord và gửi message.</summary>
 public interface IDiscordService
 {
-	Task ConnectAsync();
-	Task SendVideoNotificationAsync(VideoInfo video);
-	Task SendToChannelAsync(ulong channelId, string? text = null,
-		Discord.Embed? embed = null,
-		Discord.MessageComponent? components = null,
-		Discord.AllowedMentions? allowedMentions = null);
-	Discord.WebSocket.DiscordSocketClient Client { get; }
+    Task ConnectAsync();
+    Task SendVideoNotificationAsync(VideoInfo video);
+    Task SendToChannelAsync(ulong channelId, string? text = null,
+        Discord.Embed? embed = null,
+        Discord.MessageComponent? components = null,
+        Discord.AllowedMentions? allowedMentions = null);
+    Discord.WebSocket.DiscordSocketClient Client { get; }
 }
 
 /// <summary>Đọc/ghi BotState (last video ID).</summary>
 public interface IPersistenceService
 {
-	Task<BotState> LoadStateAsync();
-	Task SaveStateAsync(BotState state);
+    Task<BotState> LoadStateAsync();
+    Task SaveStateAsync(BotState state);
 }
 
 /// <summary>Đọc/ghi live state cache (dictionary video ID → trạng thái).</summary>
 public interface ILiveStateService
 {
-	Task<Dictionary<string, string>> LoadAsync();
-	Task SaveAsync(Dictionary<string, string> state);
+    Task<Dictionary<string, string>> LoadAsync();
+    Task SaveAsync(Dictionary<string, string> state);
 }
 
 /// <summary>Tương tác với YouTube Data API v3.</summary>
 public interface IYouTubeApiService
 {
-	Task<List<string>> GetLatestVideoIdsAsync();
-	Task<VideoInfo?> GetVideoByIdAsync(string videoId);
+    Task<List<string>> GetLatestVideoIdsAsync();
+    Task<VideoInfo?> GetVideoByIdAsync(string videoId);
 }
 
 /// <summary>Build Discord embed cho shop.</summary>
 public interface IShopService
 {
-	(Discord.Embed embed, Discord.MessageComponent components) BuildOverview();
-	(Discord.Embed embed, Discord.MessageComponent components)? BuildGameEmbed(ShopGameConfig game);
+    Task WarmDiscountCacheAsync();
+    Task<(Discord.Embed embed, Discord.MessageComponent components)> BuildOverviewAsync();
+    Task<(Discord.Embed embed, Discord.MessageComponent components)?> BuildGameEmbedAsync(ShopGameConfig game);
 }
 
 /// <summary>Đọc/ghi ShopMessageState.</summary>
 public interface IShopMessagePersistenceService
 {
-	Task<ShopMessageState> LoadAsync();
-	Task SaveAsync(ShopMessageState state);
+    Task<ShopMessageState> LoadAsync();
+    Task SaveAsync(ShopMessageState state);
 }

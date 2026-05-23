@@ -17,6 +17,13 @@ public class YouTubeCheckerBackgroundService : BackgroundService
     private readonly BotConfiguration _config;
     private readonly ILogger<YouTubeCheckerBackgroundService> _logger;
 
+    // Các trạng thái "đã xử lý xong" — không cần xử lý lại
+    private static readonly HashSet<string> TerminalStatuses = new()
+    {
+        "video_sent",
+        "live_sent",   // FIX: live_sent cũng là terminal — tránh re-notify khi live kết thúc
+    };
+
     public YouTubeCheckerBackgroundService(
         IDiscordService discord,
         DiscordService discordImpl,
@@ -73,17 +80,32 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         {
             if (ct.IsCancellationRequested) break;
 
-            if (botState.LastVideoId == videoId && !liveStates.ContainsKey(videoId))
+            var currentStatus = liveStates.GetValueOrDefault(videoId, "none");
+
+            // FIX: Skip nếu video đã được xử lý xong (terminal status)
+            // Logic cũ: `botState.LastVideoId == videoId && !liveStates.ContainsKey(videoId)`
+            // → SAI: video có trong liveStates với "video_sent"/"live_sent" vẫn bị process lại
+            if (TerminalStatuses.Contains(currentStatus))
+            {
+                _logger.LogDebug("Skip {VideoId} — already terminal ({Status})", videoId, currentStatus);
                 continue;
+            }
+
+            // FIX: Cũng skip nếu là LastVideoId thuần túy (video bình thường đã gửi)
+            // nhưng KHÔNG có entry trong liveStates (edge case: state file cũ trước khi có liveStates)
+            if (botState.LastVideoId == videoId && currentStatus == "none")
+            {
+                _logger.LogDebug("Skip {VideoId} — is LastVideoId with no live state", videoId);
+                continue;
+            }
 
             var video = await _youtube.GetVideoByIdAsync(videoId);
             if (video is null) continue;
 
-            var currentStatus = liveStates.GetValueOrDefault(videoId, "none");
-
             if (video.LiveBroadcastContent == "live")
             {
-                if (currentStatus != "live_sent" && !currentStatus.StartsWith("live_notified"))
+                // Chỉ notify 1 lần khi bắt đầu live
+                if (!currentStatus.StartsWith("live_notified"))
                 {
                     await _discord.SendVideoNotificationAsync(video);
                     liveStates[videoId] = $"live_notified_{DateTime.UtcNow:O}";
@@ -92,8 +114,10 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 }
                 else
                 {
-                    liveStates[videoId] = "live";
+                    // Đang live, đã notify rồi — cập nhật timestamp để biết live còn active
+                    liveStates[videoId] = $"live_notified_{DateTime.UtcNow:O}";
                     liveChanged = true;
+                    _logger.LogDebug("Live still active — {VideoId}", videoId);
                 }
             }
             else if (video.LiveBroadcastContent == "upcoming")
@@ -107,6 +131,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             }
             else
             {
+                // Video thường (hoặc live đã kết thúc)
                 if (botState.LastVideoId != videoId)
                 {
                     await _discord.SendVideoNotificationAsync(video);
@@ -115,7 +140,17 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                     liveStates[videoId] = "video_sent";
                     liveChanged = true;
                     _logger.LogInformation("VIDEO notification sent — {VideoId}", videoId);
-                    break;
+                    break; // Chỉ xử lý 1 video mới nhất mỗi lần check
+                }
+                else
+                {
+                    // FIX: Live đã kết thúc, cập nhật status về terminal để không process lại
+                    if (currentStatus != "none" && currentStatus != "video_sent")
+                    {
+                        liveStates[videoId] = "video_sent";
+                        liveChanged = true;
+                        _logger.LogInformation("Live ended, marked as video_sent — {VideoId}", videoId);
+                    }
                 }
             }
         }
