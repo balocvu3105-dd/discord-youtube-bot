@@ -13,7 +13,6 @@ public class LdShopDiscountService
 
     private const string SkuPageUrl = "https://api.ldshop.gg/api/commodity/v4/sku/page";
 
-    // Cache: commodityId → discount%
     private readonly ConcurrentDictionary<int, int> _cache = new();
 
     public LdShopDiscountService(
@@ -40,11 +39,6 @@ public class LdShopDiscountService
         _httpClient.DefaultRequestHeaders.Add("Sec-Fetch-Site", "same-site");
     }
 
-    /// <summary>
-    /// Warm cache cho tất cả games trước khi build embeds.
-    /// skuLabelId vẫn nhận vào để không break interface,
-    /// nhưng không dùng trong payload — lấy toàn bộ SKU để tính đúng.
-    /// </summary>
     public async Task WarmCacheAsync(IEnumerable<(int commodityId, int skuLabelId)> games)
     {
         foreach (var (commodityId, skuLabelId) in games)
@@ -55,30 +49,18 @@ public class LdShopDiscountService
         }
     }
 
-    /// <summary>
-    /// Lấy discount từ cache (đã warm trước đó).
-    /// </summary>
     public int? GetDiscount(int commodityId)
         => _cache.TryGetValue(commodityId, out var v) ? v : null;
 
-    /// <summary>
-    /// Fetch trực tiếp từ API (không qua cache).
-    ///
-    /// FIX: Bỏ skuLabelId khỏi payload.
-    /// Lý do: skuLabelId lọc theo nhóm SKU quá hẹp → chỉ lấy được
-    /// một phần nhỏ SKU → average discount bị sai lệch so với % hiển thị trên web.
-    /// Lấy toàn bộ SKU (không filter) → tính average đúng với web.
-    /// </summary>
     public async Task<double?> FetchDiscountAsync(int commodityId, int skuLabelId)
     {
         try
         {
-            // FIX: Không truyền skuLabelId vào payload
-            // để lấy toàn bộ SKU của game, tính average discount chính xác
             var payload = new
             {
                 page = new { current = 1, size = 100 },
-                commodityId
+                commodityId,
+                skuLabelId
             };
 
             var json = JsonSerializer.Serialize(payload);
@@ -98,34 +80,34 @@ public class LdShopDiscountService
             var result = JsonSerializer.Deserialize<SkuPageResponse>(body);
 
             if (result?.Data is null || result.Data.Count == 0)
-                return null;
-
-            // Chỉ lấy SKU đang bán (stockStatus=1), không phải promo đặc biệt (promotion=0),
-            // và có đủ dữ liệu giá để tính %
-            var validItems = result.Data
-                .Where(x => x.Promotion == 0
-                         && x.StockStatus == 1
-                         && x.SellPrice?.Amount > 0
-                         && x.TotalDiscount?.Amount > 0)
-                .ToList();
-
-            if (validItems.Count == 0)
             {
-                _logger.LogWarning("No valid items — commodityId={Id}", commodityId);
+                _logger.LogWarning("Empty data — commodityId={Id}", commodityId);
                 return null;
             }
 
-            // Lấy discount cao nhất thay vì average
-            // Lý do: web LDShop hiển thị mức giảm cao nhất của game,
-            // không phải average của tất cả mệnh giá
-            var maxDiscount = validItems
-                .Max(x => x.TotalDiscount!.Amount / x.SellPrice!.Amount * 100);
+            // Lấy tất cả SKU đang có hàng (stockStatus=1) và có discount
+            // Không filter theo promotion vì web LDShop badge lấy max của tất cả loại
+            var discounts = result.Data
+                .Where(x => x.StockStatus == 1
+                         && !string.IsNullOrEmpty(x.Discount)
+                         && x.Discount != "None")
+                .Select(x => ParseDiscountPercent(x.Discount))
+                .Where(x => x > 0)
+                .ToList();
+
+            if (discounts.Count == 0)
+            {
+                _logger.LogInformation("No discount found — commodityId={Id}", commodityId);
+                return 0;
+            }
+
+            var maxDiscount = discounts.Max();
 
             _logger.LogInformation(
-                "Discount fetched — commodityId={Id}, items={Count}, max={Pct:F1}%",
-                commodityId, validItems.Count, maxDiscount);
+                "Discount fetched — commodityId={Id}, max={Pct}%",
+                commodityId, maxDiscount);
 
-            return Math.Round(maxDiscount, 1);
+            return maxDiscount;
         }
         catch (Exception ex)
         {
@@ -134,7 +116,13 @@ public class LdShopDiscountService
         }
     }
 
-    // ── DTOs ─────────────────────────────────────────────────────────────
+    private static int ParseDiscountPercent(string? discount)
+    {
+        if (string.IsNullOrEmpty(discount) || discount == "None") return 0;
+        var idx = discount.IndexOf('%');
+        if (idx <= 0) return 0;
+        return int.TryParse(discount[..idx], out var pct) ? pct : 0;
+    }
 
     private class SkuPageResponse
     {
@@ -144,22 +132,13 @@ public class LdShopDiscountService
 
     private class SkuItem
     {
-        [JsonPropertyName("sellPriceMoney")]
-        public MoneyInfo? SellPrice { get; set; }
-
-        [JsonPropertyName("totalDiscountMoney")]
-        public MoneyInfo? TotalDiscount { get; set; }
+        [JsonPropertyName("discount")]
+        public string? Discount { get; set; }
 
         [JsonPropertyName("stockStatus")]
         public int StockStatus { get; set; }
 
         [JsonPropertyName("promotion")]
         public int Promotion { get; set; }
-    }
-
-    private class MoneyInfo
-    {
-        [JsonPropertyName("amount")]
-        public double Amount { get; set; }
     }
 }
