@@ -8,7 +8,7 @@ Production-ready Discord bot built with .NET for:
 
 \- YouTube video notifications
 
-\- YouTube live stream alerts
+\- YouTube livestream alerts
 
 \- LDShop promo tracking
 
@@ -20,7 +20,7 @@ Production-ready Discord bot built with .NET for:
 
 
 
-
+\---
 
 
 
@@ -29,6 +29,8 @@ Production-ready Discord bot built with .NET for:
 
 
 \## YouTube Notifications
+
+
 
 \- Detect new uploads
 
@@ -44,6 +46,8 @@ Production-ready Discord bot built with .NET for:
 
 \## LDShop Tracking
 
+
+
 \- Track game top-up promotions
 
 \- Refresh shop data automatically
@@ -55,6 +59,8 @@ Production-ready Discord bot built with .NET for:
 
 
 \## Reliability
+
+
 
 \- Background workers
 
@@ -68,7 +74,7 @@ Production-ready Discord bot built with .NET for:
 
 
 
-
+\---
 
 
 
@@ -90,7 +96,7 @@ Production-ready Discord bot built with .NET for:
 
 
 
-
+\---
 
 
 
@@ -98,7 +104,7 @@ Production-ready Discord bot built with .NET for:
 
 
 
-
+```txt
 
 Background/     -> background workers
 
@@ -114,9 +120,11 @@ data/           -> runtime state storage
 
 logs/           -> runtime logs
 
+```
 
 
 
+\---
 
 
 
@@ -126,9 +134,19 @@ logs/           -> runtime logs
 
 \## Clone Repository
 
-git clone https://github.com/YOUR\_USERNAME/discord-youtube-bot.git
+
+
+```bash
+
+git clone https://github.com/balocvu3105-dd/discord-youtube-bot.git
 
 cd discord-youtube-bot
+
+```
+
+
+
+\---
 
 
 
@@ -136,15 +154,21 @@ cd discord-youtube-bot
 
 
 
-Create .env
+Create `.env`
 
 
 
-
+```env
 
 BotConfiguration\_\_DiscordToken=YOUR\_DISCORD\_TOKEN
 
 BotConfiguration\_\_YoutubeApiKey=YOUR\_YOUTUBE\_API\_KEY
+
+```
+
+
+
+\---
 
 
 
@@ -152,7 +176,7 @@ BotConfiguration\_\_YoutubeApiKey=YOUR\_YOUTUBE\_API\_KEY
 
 
 
-Configure channels and IDs:
+```json
 
 {
 
@@ -168,7 +192,11 @@ Configure channels and IDs:
 
 }
 
+```
 
+
+
+\---
 
 
 
@@ -176,9 +204,17 @@ Configure channels and IDs:
 
 
 
+```bash
+
 dotnet restore
 
 dotnet run
+
+```
+
+
+
+\---
 
 
 
@@ -190,7 +226,11 @@ dotnet run
 
 
 
+```bash
+
 docker build -t youtube-discord-bot .
+
+```
 
 
 
@@ -198,7 +238,15 @@ docker build -t youtube-discord-bot .
 
 
 
+```bash
+
 docker run --env-file .env youtube-discord-bot
+
+```
+
+
+
+\---
 
 
 
@@ -210,11 +258,19 @@ docker run --env-file .env youtube-discord-bot
 
 
 
+```txt
+
 /refreshshop
+
+```
 
 
 
 Force refresh LDShop promotions.
+
+
+
+\---
 
 
 
@@ -226,13 +282,21 @@ Runtime state is stored in:
 
 
 
+```txt
+
 data/last\_video\_state.json
 
 data/live\_state.json
 
+```
+
 
 
 These files are ignored by git.
+
+
+
+\---
 
 
 
@@ -242,7 +306,17 @@ These files are ignored by git.
 
 Logs are written to:
 
+
+
+```txt
+
 logs/
+
+```
+
+
+
+\---
 
 
 
@@ -257,6 +331,10 @@ logs/
 \- Docker-ready deployment
 
 \- Config-driven architecture
+
+
+
+\---
 
 
 
