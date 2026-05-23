@@ -11,6 +11,7 @@ obj/
 # Build results
 Debug/
 Release/
+publish/
 
 # Rider
 .idea/
@@ -25,6 +26,12 @@ appsettings.Development.json
 
 # Runtime state
 data/
+logs/
+*.log
+
+last_video_state.json
+live_state.json
+promo_snapshot.json
 
 # Docker
 .dockerignore
