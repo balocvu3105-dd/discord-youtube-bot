@@ -26,7 +26,6 @@ public class ShopGameConfig
 
 	/// <summary>
 	/// % giảm giá fallback — dùng khi LDShop API không trả được giá trị.
-	/// Vẫn để trong config để bot không hiện "0%" khi API down.
 	/// </summary>
 	public int DiscountPercent { get; set; }
 
@@ -35,9 +34,22 @@ public class ShopGameConfig
 	public string Warning { get; set; } = string.Empty;
 
 	/// <summary>
-	/// Slug dùng để gọi LDShop API, ví dụ "wuthering-waves-gp".
-	/// Để trống → bỏ qua auto-fetch, dùng DiscountPercent từ config.
+	/// ID số của game trên LDShop API mới (POST /api/commodity/v4/sku/page).
+	/// WuWa=10016, Genshin=10014, Arknights Endfield=10233, NTE=10165
 	/// </summary>
+	public int CommodityId { get; set; }
+
+	/// <summary>
+	/// Label ID đi kèm với CommodityId.
+	/// WuWa=74, Genshin=82, Arknights Endfield=1, NTE=102
+	/// </summary>
+	public int SkuLabelId { get; set; }
+
+	/// <summary>
+	/// Slug cũ — giữ lại để không break appsettings.json cũ.
+	/// Không còn dùng để gọi API nữa.
+	/// </summary>
+	[System.Text.Json.Serialization.JsonIgnore]
 	public string CommoditySeo { get; set; } = string.Empty;
 }
 

@@ -6,16 +6,6 @@ using YouTubeDiscordBot.Models;
 
 namespace YouTubeDiscordBot.Services;
 
-/// <summary>
-/// Build Discord embed cho shop.
-///
-/// THAY ĐỔI so với code cũ:
-///   - Inject LdShopDiscountService để lấy % giảm giá thực tế từ API
-///   - BuildOverview / BuildGameEmbed giờ là async
-///   - Fallback tự động về DiscountPercent trong config nếu API lỗi
-///   - Thêm WarmDiscountCacheAsync() để ShopBackgroundService gọi 1 lần
-///     trước khi build tất cả embeds (tránh gọi API lẻ tẻ từng embed)
-/// </summary>
 public class ShopService : IShopService
 {
     private readonly BotConfiguration _config;
@@ -34,21 +24,17 @@ public class ShopService : IShopService
 
     // ── Cache Warm ───────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Gọi LDShop API cho tất cả games có CommoditySeo, cache kết quả.
-    /// ShopBackgroundService nên gọi method này 1 lần trước khi refresh embeds.
-    /// </summary>
     public async Task WarmDiscountCacheAsync()
     {
-        var seoList = _config.ShopGames
-            .Where(g => !string.IsNullOrWhiteSpace(g.CommoditySeo))
-            .Select(g => g.CommoditySeo)
+        var games = _config.ShopGames
+            .Where(g => g.CommodityId > 0)
+            .Select(g => (g.CommodityId, g.SkuLabelId))
             .ToList();
 
-        if (seoList.Count == 0) return;
+        if (games.Count == 0) return;
 
-        _logger.LogInformation("Warming discount cache for {Count} games...", seoList.Count);
-        await _discountSvc.WarmCacheAsync(seoList);
+        _logger.LogInformation("Warming discount cache for {Count} games...", games.Count);
+        await _discountSvc.WarmCacheAsync(games);
     }
 
     // ── Overview Embed ───────────────────────────────────────────────────────
@@ -77,7 +63,7 @@ public class ShopService : IShopService
 
         foreach (var game in _config.ShopGames)
         {
-            var pct = await ResolveDiscountAsync(game);
+            var pct = ResolveDiscount(game);
             embed.AddField(
                 $"{game.Emoji} {game.Name}",
                 pct > 0 ? $"🔥 -{pct}%" : "🔥 Ưu đãi",
@@ -100,7 +86,7 @@ public class ShopService : IShopService
 
     public async Task<(Embed embed, MessageComponent components)?> BuildGameEmbedAsync(ShopGameConfig game)
     {
-        var pct = await ResolveDiscountAsync(game);
+        var pct = ResolveDiscount(game);
 
         var sb = new System.Text.StringBuilder();
 
@@ -139,21 +125,16 @@ public class ShopService : IShopService
                 url: game.AffiliateLink)
             .Build();
 
-        return (embed, components);
+        return await Task.FromResult((embed, components));
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Lấy discount cho một game:
-    ///   1. Nếu có CommoditySeo → gọi API (kết quả đã cached sau WarmDiscountCacheAsync)
-    ///   2. Fallback về DiscountPercent trong config
-    /// </summary>
-    private async Task<int> ResolveDiscountAsync(ShopGameConfig game)
+    private int ResolveDiscount(ShopGameConfig game)
     {
-        if (!string.IsNullOrWhiteSpace(game.CommoditySeo))
+        if (game.CommodityId > 0)
         {
-            var live = await _discountSvc.GetDiscountAsync(game.CommoditySeo);
+            var live = _discountSvc.GetDiscount(game.CommodityId);
             if (live.HasValue)
             {
                 if (live.Value != game.DiscountPercent)
