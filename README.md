@@ -1,5 +1,10 @@
 # YouTube Discord Bot
 
+![Build](https://github.com/balocvu3105-dd/discord-youtube-bot/actions/workflows/dotnet.yml/badge.svg)
+![.NET](https://img.shields.io/badge/.NET-8-blue)
+![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
+
 Production-ready Discord bot built with .NET for:
 
 - YouTube video notifications
