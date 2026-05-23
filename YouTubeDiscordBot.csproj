@@ -14,16 +14,37 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<!-- Discord -->
 		<PackageReference Include="Discord.Net" Version="3.19.1" />
 		<PackageReference Include="Discord.Net.Interactions" Version="3.19.1" />
+
+		<!-- Env -->
 		<PackageReference Include="DotNetEnv" Version="3.2.0" />
+
+		<!-- YouTube -->
 		<PackageReference Include="Google.Apis.YouTube.v3" Version="1.68.0.3570" />
-		<PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
+
+		<!-- Config / Hosting -->
 		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+
+		<!-- JSON -->
 		<PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+
+		<!-- RSS fallback -->
 		<PackageReference Include="System.ServiceModel.Syndication" Version="10.0.7" />
+
+		<!-- Logging: Serilog -->
+		<PackageReference Include="Serilog" Version="4.1.0" />
+		<PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
+		<PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+		<PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+		<PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
+
+		<!-- Resilience: dùng Microsoft.Extensions.Http.Resilience (Polly 8 native cho .NET 8) -->
+		<!-- Không dùng Polly.Extensions.Http 3.x vì nó dành cho Polly 7.x -->
+		<PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="8.10.0" />
 	</ItemGroup>
 
 </Project>

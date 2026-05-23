@@ -1,4 +1,4 @@
-﻿using Google.Apis.Services;
+using Google.Apis.Services;
 using Google.Apis.YouTube.v3;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -7,314 +7,122 @@ using YouTubeDiscordBot.Models;
 
 namespace YouTubeDiscordBot.Services;
 
-public class YouTubeApiService
+/// <summary>
+/// Giao tiếp với YouTube Data API v3.
+///
+/// Quota YouTube:
+///   10,000 units/ngày. PlaylistItems.list = 1 unit, Videos.list = 1 unit.
+///   → Bot check 120s/lần = 720 lần/ngày × 2 API calls = 1440 units — rất an toàn.
+///   Nếu gặp 403 quotaExceeded → log warning, trả về empty list, retry lần sau.
+/// </summary>
+public class YouTubeApiService : IYouTubeApiService
 {
     private readonly YouTubeService _ytClient;
-
     private readonly BotConfiguration _config;
-
     private readonly ILogger<YouTubeApiService> _logger;
 
-    private const int MaxRetry = 3;
-
     public YouTubeApiService(
-        HttpClient httpClient,
         IOptions<BotConfiguration> config,
         ILogger<YouTubeApiService> logger)
     {
         _config = config.Value;
-
         _logger = logger;
 
-        // =====================================================
-        // DEBUG CURRENT API KEY
-        // =====================================================
-
-        if (string.IsNullOrWhiteSpace(
-                _config.YoutubeApiKey))
-        {
-            _logger.LogError(
-                "❌ YouTube API Key is EMPTY");
-        }
+        if (string.IsNullOrWhiteSpace(_config.YoutubeApiKey))
+            _logger.LogError("YouTube API Key bị trống — bot sẽ không poll được YouTube");
         else
         {
-            var preview =
-                _config.YoutubeApiKey.Length >= 10
-                    ? _config.YoutubeApiKey[..10]
-                    : _config.YoutubeApiKey;
-
-            _logger.LogInformation(
-                "🔑 Current API Key Prefix: {Key}",
-                preview);
+            var preview = _config.YoutubeApiKey.Length >= 8
+                ? _config.YoutubeApiKey[..8] + "..."
+                : "***";
+            _logger.LogInformation("YouTube API Key prefix: {Preview}", preview);
         }
 
-        // =====================================================
-        // YOUTUBE CLIENT
-        // =====================================================
+        _ytClient = new YouTubeService(new BaseClientService.Initializer
+        {
+            ApiKey = _config.YoutubeApiKey,
+            ApplicationName = "YouTubeDiscordBot"
+        });
 
-        _ytClient = new YouTubeService(
-            new BaseClientService.Initializer
-            {
-                ApiKey =
-                    _config.YoutubeApiKey,
-
-                ApplicationName =
-                    "YouTubeDiscordBot"
-            });
-
-        _ytClient.HttpClient.Timeout =
-            TimeSpan.FromSeconds(60);
-
-        _logger.LogInformation(
-            "✅ YouTubeApiService initialized");
+        _ytClient.HttpClient.Timeout = TimeSpan.FromSeconds(30);
+        _logger.LogInformation("YouTubeApiService initialized");
     }
 
-    // =====================================================
-    // GET LATEST VIDEO IDS
-    // =====================================================
-
-    public async Task<List<string>>
-        GetLatestVideoIdsFromApiAsync()
+    public async Task<List<string>> GetLatestVideoIdsAsync()
     {
         try
         {
-            _logger.LogInformation(
-                "📡 Fetching uploads playlist...");
+            var channelReq = _ytClient.Channels.List("contentDetails");
+            channelReq.Id = _config.YoutubeChannelId;
+            var channelResp = await channelReq.ExecuteAsync();
 
-            // =================================================
-            // STEP 1
-            // GET CHANNEL CONTENT DETAILS
-            // =================================================
-
-            var channelRequest =
-                _ytClient.Channels.List(
-                    "contentDetails");
-
-            channelRequest.Id =
-                _config.YoutubeChannelId;
-
-            var channelResponse =
-                await channelRequest.ExecuteAsync();
-
-            if (channelResponse.Items == null ||
-                channelResponse.Items.Count == 0)
+            if (channelResp.Items is null || channelResp.Items.Count == 0)
             {
-                _logger.LogWarning(
-                    "⚠️ Channel not found");
-
-                return new List<string>();
+                _logger.LogWarning("Channel không tìm thấy: {Id}", _config.YoutubeChannelId);
+                return [];
             }
 
-            var uploadsPlaylistId =
-                channelResponse.Items[0]
-                    .ContentDetails
-                    .RelatedPlaylists
-                    .Uploads;
+            var playlistId = channelResp.Items[0].ContentDetails.RelatedPlaylists.Uploads;
 
-            _logger.LogInformation(
-                "📂 Upload playlist ID: {PlaylistId}",
-                uploadsPlaylistId);
+            var playlistReq = _ytClient.PlaylistItems.List("snippet");
+            playlistReq.PlaylistId = playlistId;
+            playlistReq.MaxResults = 5;
+            var playlistResp = await playlistReq.ExecuteAsync();
 
-            // =================================================
-            // STEP 2
-            // GET LATEST VIDEOS
-            // =================================================
+            if (playlistResp.Items is null) return [];
 
-            var playlistRequest =
-                _ytClient.PlaylistItems.List(
-                    "snippet");
+            var ids = playlistResp.Items
+                .Select(x => x.Snippet.ResourceId.VideoId)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct()
+                .ToList();
 
-            playlistRequest.PlaylistId =
-                uploadsPlaylistId;
-
-            playlistRequest.MaxResults = 5;
-
-            var playlistResponse =
-                await playlistRequest.ExecuteAsync();
-
-            if (playlistResponse.Items == null)
-            {
-                _logger.LogWarning(
-                    "⚠️ Playlist returned NULL");
-
-                return new List<string>();
-            }
-
-            var videoIds =
-                playlistResponse.Items
-                    .Select(x =>
-                        x.Snippet
-                            .ResourceId
-                            .VideoId)
-                    .Where(x =>
-                        !string.IsNullOrWhiteSpace(x))
-                    .Distinct()
-                    .ToList();
-
-            _logger.LogInformation(
-                "🎥 Found {Count} latest videos",
-                videoIds.Count);
-
-            foreach (var id in videoIds)
-            {
-                _logger.LogInformation(
-                    "📺 Video ID: {VideoId}",
-                    id);
-            }
-
-            return videoIds;
+            _logger.LogDebug("Fetched {Count} latest video IDs", ids.Count);
+            return ids;
         }
-        catch (Google.GoogleApiException ex)
+        catch (Google.GoogleApiException ex) when (ex.Error?.Code == 403)
         {
-            _logger.LogError(
-                ex,
-                """
-                ❌ YouTube API Error
-
-                Message:
-                {Message}
-
-                Error:
-                {Error}
-                """,
-                ex.Message,
-                ex.Error?.Message);
-
-            return new List<string>();
+            _logger.LogWarning(
+                "YouTube quota exceeded (403) — bot sẽ tự retry sau {Seconds}s",
+                _config.CheckIntervalSeconds);
+            return [];
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                ex,
-                "❌ Failed to fetch latest videos");
-
-            return new List<string>();
+            _logger.LogError(ex, "GetLatestVideoIdsAsync thất bại");
+            return [];
         }
     }
 
-    // =====================================================
-    // GET VIDEO DETAIL
-    // =====================================================
-
-    public async Task<VideoInfo?>
-        GetVideoByIdAsync(
-            string videoId)
+    public async Task<VideoInfo?> GetVideoByIdAsync(string videoId)
     {
-        for (int attempt = 1;
-             attempt <= MaxRetry;
-             attempt++)
+        try
         {
-            try
+            var req = _ytClient.Videos.List("snippet");
+            req.Id = videoId;
+            var resp = await req.ExecuteAsync();
+
+            if (resp.Items is null || resp.Items.Count == 0)
             {
-                _logger.LogInformation(
-                    "🎬 Fetching video detail: {VideoId}",
-                    videoId);
-
-                var request =
-                    _ytClient.Videos.List(
-                        "snippet");
-
-                request.Id = videoId;
-
-                var response =
-                    await request.ExecuteAsync();
-
-                if (response.Items == null ||
-                    response.Items.Count == 0)
-                {
-                    _logger.LogWarning(
-                        "⚠️ Video not found: {VideoId}",
-                        videoId);
-
-                    return null;
-                }
-
-                var v = response.Items[0];
-
-                var s = v.Snippet;
-
-                var result = new VideoInfo
-                {
-                    VideoId =
-                        v.Id,
-
-                    Title =
-                        s.Title,
-
-                    ThumbnailUrl =
-                        s.Thumbnails?.High?.Url ?? "",
-
-                    Url =
-                        $"https://www.youtube.com/watch?v={v.Id}",
-
-                    ChannelName =
-                        s.ChannelTitle,
-
-                    LiveBroadcastContent =
-                        s.LiveBroadcastContent
-                };
-
-                _logger.LogInformation(
-                    """
-                    ✅ Video fetched
-
-                    Title: {Title}
-                    Live: {Live}
-                    """,
-                    result.Title,
-                    result.LiveBroadcastContent);
-
-                return result;
+                _logger.LogWarning("Video không tìm thấy: {VideoId}", videoId);
+                return null;
             }
-            catch (Exception ex)
+
+            var v = resp.Items[0];
+            return new VideoInfo
             {
-                _logger.LogWarning(
-                    ex,
-                    """
-                    ⚠️ GetVideoById failed
-
-                    Attempt: {Attempt}
-                    VideoId: {VideoId}
-                    """,
-                    attempt,
-                    videoId);
-
-                if (attempt == MaxRetry)
-                {
-                    _logger.LogError(
-                        """
-                        ❌ Failed after retries
-
-                        VideoId: {VideoId}
-                        """,
-                        videoId);
-
-                    return null;
-                }
-
-                await DelayWithBackoff(
-                    attempt);
-            }
+                VideoId = v.Id,
+                Title = v.Snippet.Title,
+                ThumbnailUrl = v.Snippet.Thumbnails?.High?.Url ?? string.Empty,
+                Url = $"https://www.youtube.com/watch?v={v.Id}",
+                ChannelName = v.Snippet.ChannelTitle,
+                LiveBroadcastContent = v.Snippet.LiveBroadcastContent ?? "none"
+            };
         }
-
-        return null;
-    }
-
-    // =====================================================
-    // HELPER
-    // =====================================================
-
-    private async Task DelayWithBackoff(
-        int attempt)
-    {
-        int delaySeconds =
-            2 * attempt;
-
-        _logger.LogInformation(
-            "⏳ Retry after {Delay}s...",
-            delaySeconds);
-
-        await Task.Delay(
-            TimeSpan.FromSeconds(delaySeconds));
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetVideoByIdAsync thất bại — {VideoId}", videoId);
+            return null;
+        }
     }
 }
