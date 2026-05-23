@@ -1,0 +1,93 @@
+[2026-05-23 16:07:56 INF]  — ═══════════════════════════════════════
+[2026-05-23 16:07:56 INF]  — YouTubeDiscordBot starting...
+[2026-05-23 16:07:56 INF]  — ═══════════════════════════════════════
+[2026-05-23 16:07:57 INF] YouTubeDiscordBot.Services.DiscordService — Đang kết nối Discord...
+[2026-05-23 16:07:57 INF] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] Discord.Net v3.19.1 (API v10)
+[2026-05-23 16:07:57 INF] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] Connecting
+[2026-05-23 16:07:59 INF] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] Connected
+[2026-05-23 16:08:00 INF]  — Slash commands registered globally
+[2026-05-23 16:08:00 INF] YouTubeDiscordBot.Services.YouTubeApiService — YouTube API Key prefix: AIzaSyBL...
+[2026-05-23 16:08:00 INF] YouTubeDiscordBot.Services.YouTubeApiService — YouTubeApiService initialized
+[2026-05-23 16:08:00 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — YouTubeCheckerBackgroundService starting — Interval=120s
+[2026-05-23 16:08:00 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — Discord ready — YouTubeCheckerBackgroundService running
+[2026-05-23 16:08:00 INF] YouTubeDiscordBot.Background.ShopBackgroundService — ShopBackgroundService starting — Channel=1501077537638449202, Refresh=24h
+[2026-05-23 16:08:00 INF] YouTubeDiscordBot.Background.ShopBackgroundService — Discord ready — ShopBackgroundService running
+[2026-05-23 16:08:00 INF] YouTubeDiscordBot.Background.ShopBackgroundService — Refreshing shop messages...
+[2026-05-23 16:08:00 INF] YouTubeDiscordBot.Services.DiscordService — Discord Ready — logged in as Cartethyia_bot#4931
+[2026-05-23 16:08:00 INF] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] Ready
+[2026-05-23 16:08:00 INF] YouTubeDiscordBot.Services.ShopMessagePersistenceService — ShopMessageState loaded — PinnedId=1507386465464746045 GameCount=4
+[2026-05-23 16:08:01 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: a9QCsqBD0DM
+[2026-05-23 16:08:01 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 0 entries
+[2026-05-23 16:08:01 INF] YouTubeDiscordBot.Background.ShopBackgroundService — Overview message updated — 1507386465464746045
+[2026-05-23 16:08:02 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Rước Denia về nhà cùng anh em và cái kết ... (VIDEO)
+[2026-05-23 16:08:02 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — iDlVtq3Kz7A
+[2026-05-23 16:08:02 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:08:04 INF] YouTubeDiscordBot.Background.ShopBackgroundService — [Wuthering Waves] embed updated — 1507416714307047454
+[2026-05-23 16:08:06 INF] YouTubeDiscordBot.Background.ShopBackgroundService — [Genshin Impact] embed updated — 1507416722548719817
+[2026-05-23 16:08:08 INF] YouTubeDiscordBot.Background.ShopBackgroundService — [Arknights Endfield] embed updated — 1507416730870349959
+[2026-05-23 16:08:11 WRN] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] Rate limit triggered: PATCH channels/1501077537638449202/messages/1507416738923286734 Remaining: 1s (Bucket: 91732e5541d1600fc18d118a7a481786)
+[2026-05-23 16:08:13 INF] YouTubeDiscordBot.Background.ShopBackgroundService — [Neverness to Everness] embed updated — 1507416738923286734
+[2026-05-23 16:08:15 INF] YouTubeDiscordBot.Background.ShopBackgroundService — Shop refresh completed
+[2026-05-23 16:08:15 INF] YouTubeDiscordBot.Background.ShopBackgroundService — Next shop refresh in 24h
+[2026-05-23 16:10:02 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:10:02 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 1 entries
+[2026-05-23 16:10:04 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Subnautica 2 #3: Xây nhà lắp tàu chiến quái thôiiiiii (VIDEO)
+[2026-05-23 16:10:04 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — W8f5rNJch3w
+[2026-05-23 16:10:04 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:12:06 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:12:06 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 2 entries
+[2026-05-23 16:12:06 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Rước Denia về nhà cùng anh em và cái kết ... (VIDEO)
+[2026-05-23 16:12:06 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — iDlVtq3Kz7A
+[2026-05-23 16:12:06 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:12:54 INF] YouTubeDiscordBot.Services.ShopMessagePersistenceService — ShopMessageState loaded — PinnedId=1507386465464746045 GameCount=4
+[2026-05-23 16:14:08 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:14:08 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 2 entries
+[2026-05-23 16:14:09 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Subnautica 2 #3: Xây nhà lắp tàu chiến quái thôiiiiii (VIDEO)
+[2026-05-23 16:14:09 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — W8f5rNJch3w
+[2026-05-23 16:14:09 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:16:09 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:16:09 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 2 entries
+[2026-05-23 16:16:10 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Rước Denia về nhà cùng anh em và cái kết ... (VIDEO)
+[2026-05-23 16:16:10 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — iDlVtq3Kz7A
+[2026-05-23 16:16:10 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:16:22 INF] YouTubeDiscordBot.Services.ShopMessagePersistenceService — ShopMessageState loaded — PinnedId=1507386465464746045 GameCount=4
+[2026-05-23 16:16:23 INF] YouTubeDiscordBot.Services.ShopMessagePersistenceService — ShopMessageState saved — PinnedId=1507673546682535997 GameCount=4
+[2026-05-23 16:18:14 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:18:14 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 2 entries
+[2026-05-23 16:18:15 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Subnautica 2 #3: Xây nhà lắp tàu chiến quái thôiiiiii (VIDEO)
+[2026-05-23 16:18:15 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — W8f5rNJch3w
+[2026-05-23 16:18:15 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:20:15 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:20:15 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 2 entries
+[2026-05-23 16:20:17 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Rước Denia về nhà cùng anh em và cái kết ... (VIDEO)
+[2026-05-23 16:20:17 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — iDlVtq3Kz7A
+[2026-05-23 16:20:17 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:22:18 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:22:18 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 2 entries
+[2026-05-23 16:22:19 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Subnautica 2 #3: Xây nhà lắp tàu chiến quái thôiiiiii (VIDEO)
+[2026-05-23 16:22:19 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — W8f5rNJch3w
+[2026-05-23 16:22:19 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:24:21 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:24:21 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 2 entries
+[2026-05-23 16:24:22 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Rước Denia về nhà cùng anh em và cái kết ... (VIDEO)
+[2026-05-23 16:24:22 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — iDlVtq3Kz7A
+[2026-05-23 16:24:22 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:26:23 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:26:23 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 2 entries
+[2026-05-23 16:26:24 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Subnautica 2 #3: Xây nhà lắp tàu chiến quái thôiiiiii (VIDEO)
+[2026-05-23 16:26:24 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — W8f5rNJch3w
+[2026-05-23 16:26:24 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:28:24 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:28:24 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 2 entries
+[2026-05-23 16:28:26 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Rước Denia về nhà cùng anh em và cái kết ... (VIDEO)
+[2026-05-23 16:28:26 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — iDlVtq3Kz7A
+[2026-05-23 16:28:26 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:30:28 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: iDlVtq3Kz7A
+[2026-05-23 16:30:28 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 2 entries
+[2026-05-23 16:30:29 INF] YouTubeDiscordBot.Services.DiscordService — Notification sent — Subnautica 2 #3: Xây nhà lắp tàu chiến quái thôiiiiii (VIDEO)
+[2026-05-23 16:30:29 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — VIDEO notification sent — W8f5rNJch3w
+[2026-05-23 16:30:29 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: W8f5rNJch3w
+[2026-05-23 16:31:46 WRN] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] null
+System.Threading.Tasks.TaskCanceledException: A task was canceled.
+   at Discord.ConnectionManager.<>c__DisplayClass29_0.<<StartAsync>b__0>d.MoveNext()
+[2026-05-23 16:31:46 INF] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] Disconnecting
