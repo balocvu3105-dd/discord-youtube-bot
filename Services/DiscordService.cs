@@ -135,8 +135,37 @@ public class DiscordService : IDiscordService
 
     private Task OnDisconnectedAsync(Exception? ex)
     {
-        // Discord.Net tự reconnect, ta chỉ log để biết
-        _logger.LogWarning(ex, "Discord disconnected — Discord.Net sẽ tự reconnect");
+        // ✅ FIX: Phân biệt loại disconnect để tránh log noise.
+        //
+        // TaskCanceledException / OperationCanceledException:
+        //   → Discord.Net internal cancellation khi reconnect hoặc heartbeat timeout.
+        //   → Hoàn toàn bình thường, Discord.Net tự xử lý, log Debug để không gây alarm.
+        //
+        // GatewayReconnectException:
+        //   → Server yêu cầu reconnect (gateway rotation, deploy Discord,...).
+        //   → Bình thường, log Information.
+        //
+        // Các exception khác (network lỗi thật, token invalid,...):
+        //   → Log Warning với full exception để debug.
+        switch (ex)
+        {
+            case TaskCanceledException or OperationCanceledException:
+                _logger.LogDebug("Discord connection cancelled (internal reconnect) — Discord.Net sẽ tự reconnect");
+                break;
+
+            case Discord.WebSocket.GatewayReconnectException:
+                _logger.LogInformation("Discord server requested reconnect — Discord.Net sẽ tự reconnect");
+                break;
+
+            case null:
+                _logger.LogInformation("Discord disconnected (no exception) — Discord.Net sẽ tự reconnect");
+                break;
+
+            default:
+                _logger.LogWarning(ex, "Discord disconnected — Discord.Net sẽ tự reconnect");
+                break;
+        }
+
         return Task.CompletedTask;
     }
 
@@ -152,6 +181,11 @@ public class DiscordService : IDiscordService
             LogSeverity.Debug => Microsoft.Extensions.Logging.LogLevel.Debug,
             _ => Microsoft.Extensions.Logging.LogLevel.Information
         };
+
+        // ✅ FIX: Discord.Net log TaskCanceledException ở Warning level gây noise.
+        // Downgrade xuống Debug vì đây là internal reconnect mechanism, không phải lỗi.
+        if (msg.Exception is TaskCanceledException or OperationCanceledException)
+            level = Microsoft.Extensions.Logging.LogLevel.Debug;
 
         _logger.Log(level, msg.Exception, "[Discord.Net] {Message}", msg.Message);
         return Task.CompletedTask;

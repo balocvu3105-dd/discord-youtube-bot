@@ -17,6 +17,12 @@ public class YouTubeCheckerBackgroundService : BackgroundService
     private readonly BotConfiguration _config;
     private readonly ILogger<YouTubeCheckerBackgroundService> _logger;
 
+    // ✅ FIX: Giữ state trong memory — chỉ load từ disk 1 lần khi startup.
+    // Trước đây CheckYouTubeAsync load lại từ disk mỗi lần check, dẫn đến
+    // state bị reset về giá trị cũ sau mỗi 2 phút → duplicate notifications.
+    private BotState _botState = new();
+    private Dictionary<string, string> _liveStates = new();
+
     private static readonly HashSet<string> TerminalStatuses = new()
     {
         "video_sent",
@@ -63,7 +69,16 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 _logger.LogError(ex, "YouTubeCheckerBackgroundService — unhandled exception");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(_config.CheckIntervalSeconds), stoppingToken);
+            try
+            {
+                // ✅ FIX: Bắt TaskCanceledException riêng để tránh crash khi
+                // stoppingToken bị cancel (shutdown bình thường hoặc Discord disconnect).
+                await Task.Delay(TimeSpan.FromSeconds(_config.CheckIntervalSeconds), stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
     }
 
@@ -75,28 +90,32 @@ public class YouTubeCheckerBackgroundService : BackgroundService
     /// FIX: Video đang live → set "live_notified" ngay (thay vì bỏ trống).
     /// Nếu để status = "none" mà live kết thúc trước lần check tiếp theo,
     /// CheckYouTubeAsync sẽ không biết đây là live đã qua → gửi "video mới".
+    ///
+    /// ✅ FIX: Load vào _botState / _liveStates (fields) thay vì biến local,
+    /// để CheckYouTubeAsync dùng lại được mà không cần load lại từ disk.
     /// </summary>
     private async Task SyncStateOnStartupAsync()
     {
         try
         {
-            var botState = await _persistence.LoadStateAsync();
-            var liveStates = await _liveState.LoadAsync();
+            // ✅ Load vào fields — đây là lần load DUY NHẤT từ disk
+            _botState = await _persistence.LoadStateAsync();
+            _liveStates = await _liveState.LoadAsync();
             var changed = false;
 
             var videoIds = await _youtube.GetLatestVideoIdsAsync();
 
             foreach (var videoId in videoIds)
             {
-                var currentStatus = liveStates.GetValueOrDefault(videoId, "none");
+                var currentStatus = _liveStates.GetValueOrDefault(videoId, "none");
 
                 // Đã có status rồi → không cần sync
                 if (currentStatus != "none") continue;
 
                 // Là LastVideoId đã biết → đánh dấu terminal ngay
-                if (botState.LastVideoId == videoId)
+                if (_botState.LastVideoId == videoId)
                 {
-                    liveStates[videoId] = "video_sent";
+                    _liveStates[videoId] = "video_sent";
                     changed = true;
                     _logger.LogInformation(
                         "Startup sync: marked LastVideoId as video_sent — {VideoId}", videoId);
@@ -118,7 +137,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                     //
                     // Với "live_notified", CheckYouTubeAsync sẽ nhận ra đây là
                     // live đã kết thúc (wasLive = true) → chỉ đánh terminal, không gửi.
-                    liveStates[videoId] = "live_notified";
+                    _liveStates[videoId] = "live_notified";
                     changed = true;
                     _logger.LogInformation(
                         "Startup sync: active live detected, marked live_notified — {VideoId}", videoId);
@@ -126,7 +145,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 else
                 {
                     // Video cũ hoặc video không biết → đánh dấu terminal
-                    liveStates[videoId] = "video_sent";
+                    _liveStates[videoId] = "video_sent";
                     changed = true;
                     _logger.LogInformation(
                         "Startup sync: marked old video as video_sent — {VideoId}", videoId);
@@ -134,7 +153,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             }
 
             if (changed)
-                await _liveState.SaveAsync(liveStates);
+                await _liveState.SaveAsync(_liveStates);
         }
         catch (Exception ex)
         {
@@ -147,8 +166,11 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         var videoIds = await _youtube.GetLatestVideoIdsAsync();
         if (videoIds.Count == 0) return;
 
-        var botState = await _persistence.LoadStateAsync();
-        var liveStates = await _liveState.LoadAsync();
+        // ✅ FIX: Dùng _botState / _liveStates từ memory — KHÔNG load lại từ disk.
+        // Load lại từ disk mỗi tick là root cause của duplicate notifications:
+        //   - Tick 1: load disk (LastVideoId=A) → thấy B mới hơn → gửi B → save (LastVideoId=B)
+        //   - Tick 2: load disk lại → file vẫn đang ghi dở hoặc race condition → thấy A "mới hơn" → gửi A
+        //   - → Loop vô hạn xen kẽ A/B
         var stateChanged = false;
         var liveChanged = false;
 
@@ -156,7 +178,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         {
             if (ct.IsCancellationRequested) break;
 
-            var currentStatus = liveStates.GetValueOrDefault(videoId, "none");
+            var currentStatus = _liveStates.GetValueOrDefault(videoId, "none");
 
             // Skip terminal
             if (TerminalStatuses.Contains(currentStatus))
@@ -166,9 +188,9 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             }
 
             // Skip LastVideoId không có live state (video cũ trước khi có liveStates)
-            if (botState.LastVideoId == videoId && currentStatus == "none")
+            if (_botState.LastVideoId == videoId && currentStatus == "none")
             {
-                liveStates[videoId] = "video_sent";
+                _liveStates[videoId] = "video_sent";
                 liveChanged = true;
                 _logger.LogDebug("Skip & mark {VideoId} — LastVideoId with no live state", videoId);
                 continue;
@@ -182,7 +204,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 if (!currentStatus.StartsWith("live_notified"))
                 {
                     await _discord.SendVideoNotificationAsync(video);
-                    liveStates[videoId] = "live_notified";
+                    _liveStates[videoId] = "live_notified";
                     liveChanged = true;
                     _logger.LogInformation("LIVE notification sent — {VideoId}", videoId);
                 }
@@ -195,7 +217,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             {
                 if (currentStatus == "none")
                 {
-                    liveStates[videoId] = "upcoming";
+                    _liveStates[videoId] = "upcoming";
                     liveChanged = true;
                     _logger.LogInformation("Upcoming detected — {VideoId}", videoId);
                 }
@@ -216,19 +238,19 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 if (wasLive)
                 {
                     // Livestream vừa kết thúc → đánh terminal, KHÔNG gửi "video mới"
-                    liveStates[videoId] = "video_sent";
+                    _liveStates[videoId] = "video_sent";
                     liveChanged = true;
                     _logger.LogInformation(
                         "Live ended (was {Status}) → video_sent, no re-notify — {VideoId}",
                         currentStatus, videoId);
                 }
-                else if (botState.LastVideoId != videoId)
+                else if (_botState.LastVideoId != videoId)
                 {
                     // Video upload thường thật sự mới → gửi thông báo
                     await _discord.SendVideoNotificationAsync(video);
-                    botState.LastVideoId = videoId;
+                    _botState.LastVideoId = videoId;
                     stateChanged = true;
-                    liveStates[videoId] = "video_sent";
+                    _liveStates[videoId] = "video_sent";
                     liveChanged = true;
                     _logger.LogInformation("VIDEO notification sent — {VideoId}", videoId);
                     break; // Chỉ 1 video mới nhất mỗi lần check
@@ -242,9 +264,9 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         }
 
         if (stateChanged)
-            await _persistence.SaveStateAsync(botState);
+            await _persistence.SaveStateAsync(_botState);
 
         if (liveChanged)
-            await _liveState.SaveAsync(liveStates);
+            await _liveState.SaveAsync(_liveStates);
     }
 }
