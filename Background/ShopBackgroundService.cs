@@ -91,7 +91,7 @@ public class ShopBackgroundService : BackgroundService
         {
             var gameChanged = await RefreshGameEmbedAsync(channel, game, state);
             stateChanged |= gameChanged;
-            await Task.Delay(1500, ct); // Rate limit buffer
+            await Task.Delay(2500, ct); // Rate limit buffer
         }
 
         if (stateChanged)
