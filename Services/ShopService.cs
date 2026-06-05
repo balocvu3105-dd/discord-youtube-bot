@@ -9,22 +9,33 @@ namespace YouTubeDiscordBot.Services;
 public class ShopService : IShopService
 {
     private readonly BotConfiguration _config;
+    private readonly LdShopDiscountService _discountService;
     private readonly ILogger<ShopService> _logger;
 
     public ShopService(
         IOptions<BotConfiguration> config,
+        LdShopDiscountService discountService,
         ILogger<ShopService> logger)
     {
         _config = config.Value;
+        _discountService = discountService;
         _logger = logger;
     }
 
     // ── Cache Warm ───────────────────────────────────────────────────────────
 
-    public Task WarmDiscountCacheAsync()
+    /// <summary>
+    /// Gọi LDShop API và cache discount % cho tất cả games đã config.
+    /// Phải được gọi trước BuildOverviewAsync / BuildGameEmbedAsync.
+    /// </summary>
+    public async Task WarmDiscountCacheAsync()
     {
-        // Không cần warm cache — dùng DiscountPercent từ appsettings.json
-        return Task.CompletedTask;
+        var games = _config.ShopGames
+            .Where(g => g.CommodityId > 0 && g.SkuLabelId > 0)
+            .Select(g => (g.CommodityId, g.SkuLabelId));
+
+        await _discountService.WarmCacheAsync(games);
+        _logger.LogInformation("Discount cache warmed for {Count} games", _config.ShopGames.Count);
     }
 
     // ── Overview Embed ───────────────────────────────────────────────────────
@@ -41,6 +52,14 @@ public class ShopService : IShopService
         sb.AppendLine("• Không đóng trình duyệt khi thanh toán");
         sb.AppendLine();
         sb.AppendLine("💡 Nếu đăng nhập sau khi bấm link, hệ thống có thể không ghi nhận hỗ trợ.");
+
+        // FIX: Dùng ShopNotice từ config nếu có
+        if (!string.IsNullOrWhiteSpace(_config.ShopNotice))
+        {
+            sb.AppendLine();
+            sb.AppendLine($"📢 {_config.ShopNotice}");
+        }
+
         sb.AppendLine();
         sb.AppendLine("🎮 Chọn game bên dưới để bắt đầu nạp");
 
@@ -53,7 +72,8 @@ public class ShopService : IShopService
 
         foreach (var game in _config.ShopGames)
         {
-            var pct = game.DiscountPercent;
+            // FIX: Dùng live discount từ cache, fallback về appsettings nếu cache miss
+            var pct = _discountService.GetDiscount(game.CommodityId) ?? game.DiscountPercent;
             embed.AddField(
                 $"{game.Emoji} {game.Name}",
                 pct > 0 ? $"🔥 -{pct}%" : "🔥 Ưu đãi",
@@ -74,11 +94,10 @@ public class ShopService : IShopService
 
     // ── Game Embed ───────────────────────────────────────────────────────────
 
-    // FIX SMELL #1: Bỏ async keyword — method không có await thật sự.
-    // Task.FromResult thay cho async/await để tránh allocate StateMachine thừa.
     public Task<(Embed embed, MessageComponent components)?> BuildGameEmbedAsync(ShopGameConfig game)
     {
-        var pct = game.DiscountPercent;
+        // FIX: Dùng live discount từ cache, fallback về appsettings nếu cache miss
+        var pct = _discountService.GetDiscount(game.CommodityId) ?? game.DiscountPercent;
 
         var sb = new System.Text.StringBuilder();
 

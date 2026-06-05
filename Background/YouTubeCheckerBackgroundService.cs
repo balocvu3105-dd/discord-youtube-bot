@@ -10,7 +10,6 @@ namespace YouTubeDiscordBot.Background;
 public class YouTubeCheckerBackgroundService : BackgroundService
 {
     private readonly IDiscordService _discord;
-    private readonly DiscordService _discordImpl;
     private readonly IYouTubeApiService _youtube;
     private readonly IPersistenceService _persistence;
     private readonly ILiveStateService _liveState;
@@ -31,7 +30,6 @@ public class YouTubeCheckerBackgroundService : BackgroundService
 
     public YouTubeCheckerBackgroundService(
         IDiscordService discord,
-        DiscordService discordImpl,
         IYouTubeApiService youtube,
         IPersistenceService persistence,
         ILiveStateService liveState,
@@ -39,7 +37,6 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         ILogger<YouTubeCheckerBackgroundService> logger)
     {
         _discord = discord;
-        _discordImpl = discordImpl;
         _youtube = youtube;
         _persistence = persistence;
         _liveState = liveState;
@@ -53,7 +50,8 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             "YouTubeCheckerBackgroundService starting — Interval={Seconds}s",
             _config.CheckIntervalSeconds);
 
-        await _discordImpl.WaitForReadyAsync();
+        // FIX: dùng IDiscordService.WaitForReadyAsync — không cần inject concrete DiscordService
+        await _discord.WaitForReadyAsync();
         await SyncStateOnStartupAsync();
 
         _logger.LogInformation("Discord ready — YouTubeCheckerBackgroundService running");
@@ -71,8 +69,6 @@ public class YouTubeCheckerBackgroundService : BackgroundService
 
             try
             {
-                // ✅ FIX: Bắt TaskCanceledException riêng để tránh crash khi
-                // stoppingToken bị cancel (shutdown bình thường hoặc Discord disconnect).
                 await Task.Delay(TimeSpan.FromSeconds(_config.CheckIntervalSeconds), stoppingToken);
             }
             catch (OperationCanceledException)
@@ -167,10 +163,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
         if (videoIds.Count == 0) return;
 
         // ✅ FIX: Dùng _botState / _liveStates từ memory — KHÔNG load lại từ disk.
-        // Load lại từ disk mỗi tick là root cause của duplicate notifications:
-        //   - Tick 1: load disk (LastVideoId=A) → thấy B mới hơn → gửi B → save (LastVideoId=B)
-        //   - Tick 2: load disk lại → file vẫn đang ghi dở hoặc race condition → thấy A "mới hơn" → gửi A
-        //   - → Loop vô hạn xen kẽ A/B
+        // Load lại từ disk mỗi tick là root cause của duplicate notifications.
         var stateChanged = false;
         var liveChanged = false;
 
@@ -226,12 +219,6 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             {
                 // LiveBroadcastContent = "none":
                 // Có thể là (A) video upload thường mới, hoặc (B) livestream vừa kết thúc.
-                //
-                // FIX: Phải phân biệt 2 trường hợp này dựa vào lịch sử status.
-                // Không phân biệt → trường hợp (B) sẽ bị gửi thêm thông báo "video mới" sai.
-                //
-                // wasLive = true  → đây là livestream vừa kết thúc → chỉ đánh terminal
-                // wasLive = false → đây là video upload thường → xử lý bình thường
                 var wasLive = currentStatus.StartsWith("live_notified")
                            || currentStatus == "upcoming";
 

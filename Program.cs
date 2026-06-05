@@ -67,6 +67,8 @@ try
         });
     });
 
+    // FIX: Chỉ đăng ký 1 lần — DiscordService implement IDiscordService.
+    // Background services dùng IDiscordService (có WaitForReadyAsync) — không cần inject concrete nữa.
     builder.Services.AddSingleton<DiscordService>();
     builder.Services.AddSingleton<IDiscordService>(sp =>
         sp.GetRequiredService<DiscordService>());
@@ -77,18 +79,27 @@ try
     builder.Services.AddSingleton<IShopMessagePersistenceService, ShopMessagePersistenceService>();
 
     // ── HTTP Clients ─────────────────────────────────────────────────────
+    // LdShopScraperService — giữ đăng ký để không break nếu dùng lại sau
     builder.Services.AddHttpClient<LdShopScraperService>()
         .AddStandardResilienceHandler();
 
-    // FIX: thêm LdShopDiscountService để ShopService inject được
+    // FIX: LdShopDiscountService phải là Singleton vì có in-memory cache (_cache).
+    // Transient = tạo mới mỗi lần inject → cache bị reset → WarmCacheAsync vô tác dụng.
+    //
+    // AddHttpClient<T> mặc định đăng ký T là Transient (vì HttpClient không thread-safe để share).
+    // Để có Singleton với HttpClient, dùng IHttpClientFactory inject vào constructor.
+    // LdShopDiscountService nhận HttpClient qua constructor → AddHttpClient vẫn dùng được,
+    // nhưng phải override registration về Singleton sau khi AddHttpClient.
     builder.Services.AddHttpClient<LdShopDiscountService>()
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-    {
-        AutomaticDecompression = System.Net.DecompressionMethods.GZip |
-                                 System.Net.DecompressionMethods.Deflate
-    })
-    .AddStandardResilienceHandler();
-    builder.Services.AddTransient<LdShopDiscountService>();
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip |
+                                     System.Net.DecompressionMethods.Deflate
+        })
+        .AddStandardResilienceHandler();
+    // Override về Singleton — AddHttpClient đã đăng ký Transient, ta replace bằng Singleton
+    builder.Services.AddSingleton<LdShopDiscountService>(sp =>
+        ActivatorUtilities.CreateInstance<LdShopDiscountService>(sp));
 
     builder.Services.AddSingleton<IYouTubeApiService, YouTubeApiService>();
 

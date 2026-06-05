@@ -14,7 +14,6 @@ namespace YouTubeDiscordBot.Background;
 public class ShopBackgroundService : BackgroundService
 {
     private readonly IDiscordService _discord;
-    private readonly DiscordService _discordImpl;
     private readonly BotConfiguration _config;
     private readonly IShopService _shopService;
     private readonly IShopMessagePersistenceService _persistence;
@@ -22,14 +21,12 @@ public class ShopBackgroundService : BackgroundService
 
     public ShopBackgroundService(
         IDiscordService discord,
-        DiscordService discordImpl,
         IOptions<BotConfiguration> config,
         IShopService shopService,
         IShopMessagePersistenceService persistence,
         ILogger<ShopBackgroundService> logger)
     {
         _discord = discord;
-        _discordImpl = discordImpl;
         _config = config.Value;
         _shopService = shopService;
         _persistence = persistence;
@@ -42,7 +39,8 @@ public class ShopBackgroundService : BackgroundService
             "ShopBackgroundService starting — Channel={ChannelId}, Refresh={Hours}h",
             _config.ShopChannelId, _config.ShopRefreshHours);
 
-        await _discordImpl.WaitForReadyAsync();
+        // FIX: dùng IDiscordService.WaitForReadyAsync — không cần inject concrete DiscordService
+        await _discord.WaitForReadyAsync();
         _logger.LogInformation("Discord ready — ShopBackgroundService running");
 
         while (!stoppingToken.IsCancellationRequested)
@@ -57,7 +55,15 @@ public class ShopBackgroundService : BackgroundService
             }
 
             _logger.LogInformation("Next shop refresh in {Hours}h", _config.ShopRefreshHours);
-            await Task.Delay(TimeSpan.FromHours(_config.ShopRefreshHours), stoppingToken);
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromHours(_config.ShopRefreshHours), stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
     }
 

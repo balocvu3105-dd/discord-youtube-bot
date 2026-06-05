@@ -45,7 +45,6 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
             await _shopService.WarmDiscountCacheAsync();
 
             var state = await _persistence.LoadAsync();
-            var stateChanged = false;
 
             // Reset state để force tạo mới (xóa message ID cũ)
             state.PinnedMessageId = 0;
@@ -57,8 +56,8 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
                 embed: overviewEmbed,
                 components: overviewComponents);
             state.PinnedMessageId = overviewMsg.Id;
-            stateChanged = true;
 
+            // FIX: delay nhất quán với ShopBackgroundService
             await Task.Delay(1500);
 
             // Tạo lại từng game embed
@@ -73,11 +72,11 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
                     components: components);
                 state.GameMessageIds[game.Name] = msg.Id;
 
-                await Task.Delay(1500);
+                // FIX: Thêm delay giữa các game embeds để tránh Discord rate-limit
+                await Task.Delay(2500);
             }
 
-            if (stateChanged)
-                await _persistence.SaveAsync(state);
+            await _persistence.SaveAsync(state);
 
             await FollowupAsync("✅ Shop đã được tạo lại thành công!", ephemeral: true);
         }
