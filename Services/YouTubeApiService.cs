@@ -14,12 +14,19 @@ namespace YouTubeDiscordBot.Services;
 ///   10,000 units/ngày. PlaylistItems.list = 1 unit, Videos.list = 1 unit.
 ///   → Bot check 120s/lần = 720 lần/ngày × 2 API calls = 1440 units — rất an toàn.
 ///   Nếu gặp 403 quotaExceeded → log warning, trả về empty list, retry lần sau.
+///
+/// FIX BUG #2: Cache playlistId sau lần fetch đầu tiên.
+///   playlistId của một channel không bao giờ thay đổi — không cần gọi
+///   Channels.List mỗi 120s. Tiết kiệm 50% quota (720 units/ngày).
 /// </summary>
 public class YouTubeApiService : IYouTubeApiService
 {
     private readonly YouTubeService _ytClient;
     private readonly BotConfiguration _config;
     private readonly ILogger<YouTubeApiService> _logger;
+
+    // FIX BUG #2: Cache playlistId — chỉ fetch 1 lần duy nhất khi startup.
+    private string? _cachedPlaylistId;
 
     public YouTubeApiService(
         IOptions<BotConfiguration> config,
@@ -52,20 +59,29 @@ public class YouTubeApiService : IYouTubeApiService
     {
         try
         {
-            var channelReq = _ytClient.Channels.List("contentDetails");
-            channelReq.Id = _config.YoutubeChannelId;
-            var channelResp = await channelReq.ExecuteAsync();
-
-            if (channelResp.Items is null || channelResp.Items.Count == 0)
+            // FIX BUG #2: Chỉ gọi Channels.List khi chưa có cache.
+            // playlistId là hằng số của channel — không bao giờ thay đổi.
+            if (_cachedPlaylistId == null)
             {
-                _logger.LogWarning("Channel không tìm thấy: {Id}", _config.YoutubeChannelId);
-                return [];
+                _logger.LogInformation("Fetching playlistId for channel {Id} (first time, will be cached)...",
+                    _config.YoutubeChannelId);
+
+                var channelReq = _ytClient.Channels.List("contentDetails");
+                channelReq.Id = _config.YoutubeChannelId;
+                var channelResp = await channelReq.ExecuteAsync();
+
+                if (channelResp.Items is null || channelResp.Items.Count == 0)
+                {
+                    _logger.LogWarning("Channel không tìm thấy: {Id}", _config.YoutubeChannelId);
+                    return [];
+                }
+
+                _cachedPlaylistId = channelResp.Items[0].ContentDetails.RelatedPlaylists.Uploads;
+                _logger.LogInformation("PlaylistId cached: {PlaylistId}", _cachedPlaylistId);
             }
 
-            var playlistId = channelResp.Items[0].ContentDetails.RelatedPlaylists.Uploads;
-
             var playlistReq = _ytClient.PlaylistItems.List("snippet");
-            playlistReq.PlaylistId = playlistId;
+            playlistReq.PlaylistId = _cachedPlaylistId;
             playlistReq.MaxResults = 5;
             var playlistResp = await playlistReq.ExecuteAsync();
 

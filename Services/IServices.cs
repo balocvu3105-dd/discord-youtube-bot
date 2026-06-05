@@ -14,6 +14,11 @@ namespace YouTubeDiscordBot.Services;
 public interface IDiscordService
 {
     Task ConnectAsync();
+
+    // FIX WARN #2: Thêm WaitForReadyAsync vào interface để BackgroundServices
+    // không cần inject concrete DiscordService chỉ để gọi method này.
+    Task WaitForReadyAsync();
+
     Task SendVideoNotificationAsync(VideoInfo video);
     Task SendToChannelAsync(ulong channelId, string? text = null,
         Discord.Embed? embed = null,

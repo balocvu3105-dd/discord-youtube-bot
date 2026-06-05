@@ -11,7 +11,6 @@ public class ShopService : IShopService
     private readonly BotConfiguration _config;
     private readonly ILogger<ShopService> _logger;
 
-    // Bỏ LdShopDiscountService — dùng config trực tiếp
     public ShopService(
         IOptions<BotConfiguration> config,
         ILogger<ShopService> logger)
@@ -24,13 +23,13 @@ public class ShopService : IShopService
 
     public Task WarmDiscountCacheAsync()
     {
-        // Không cần warm cache nữa — dùng DiscountPercent từ appsettings.json
+        // Không cần warm cache — dùng DiscountPercent từ appsettings.json
         return Task.CompletedTask;
     }
 
     // ── Overview Embed ───────────────────────────────────────────────────────
 
-    public async Task<(Embed embed, MessageComponent components)> BuildOverviewAsync()
+    public Task<(Embed embed, MessageComponent components)> BuildOverviewAsync()
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("💎 **Tiết kiệm khi nạp game qua LDShop!**");
@@ -70,12 +69,14 @@ public class ShopService : IShopService
                 url: game.AffiliateLink);
         }
 
-        return (embed.Build(), buttons.Build());
+        return Task.FromResult((embed.Build(), buttons.Build()));
     }
 
     // ── Game Embed ───────────────────────────────────────────────────────────
 
-    public async Task<(Embed embed, MessageComponent components)?> BuildGameEmbedAsync(ShopGameConfig game)
+    // FIX SMELL #1: Bỏ async keyword — method không có await thật sự.
+    // Task.FromResult thay cho async/await để tránh allocate StateMachine thừa.
+    public Task<(Embed embed, MessageComponent components)?> BuildGameEmbedAsync(ShopGameConfig game)
     {
         var pct = game.DiscountPercent;
 
@@ -116,6 +117,6 @@ public class ShopService : IShopService
                 url: game.AffiliateLink)
             .Build();
 
-        return await Task.FromResult((embed, components));
+        return Task.FromResult<(Embed, MessageComponent)?>((embed, components));
     }
 }
