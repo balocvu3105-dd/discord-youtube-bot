@@ -15,6 +15,32 @@ public class LdShopDiscountService
 
     private readonly ConcurrentDictionary<int, int> _cache = new();
 
+    // SKU name keywords bị loại trừ khi tính badge discount.
+    // Web LDShop badge chỉ tính SKU nạp thông thường, không tính:
+    //   - New User Exclusive (chỉ dành cho người mới)
+    //   - Bundle / Guarantee / Collection / Pack / Outfit / Subscription / Upgrade
+    //     (là các sản phẩm đặc biệt, không phải top-up currency thông thường)
+    private static readonly string[] ExcludedSkuKeywords =
+    [
+        "New User Exclusive",
+        "Bundle",
+        "Guarantee",
+        "Collection",
+        "Outfit",
+        "Subscription",
+        "Upgrade",
+        "Chassis",
+        "Ring",
+        "Aid",
+        "Protocol",
+        "Lightpack",
+        "Heavypack",
+        "Voyage",
+        "Prep",
+        "Insider Channel",
+        "Connoisseur Channel",
+    ];
+
     public LdShopDiscountService(
         HttpClient httpClient,
         ILogger<LdShopDiscountService> logger)
@@ -85,12 +111,13 @@ public class LdShopDiscountService
                 return null;
             }
 
-            // Lấy tất cả SKU đang có hàng (stockStatus=1) và có discount
-            // Không filter theo promotion vì web LDShop badge lấy max của tất cả loại
+            // FIX: Chỉ lấy SKU nạp currency thông thường (có hàng, có discount, không phải bundle/exclusive/pack đặc biệt)
+            // Web badge LDShop không tính các SKU dạng Bundle, Guarantee, New User Exclusive,...
             var discounts = result.Data
                 .Where(x => x.StockStatus == 1
                          && !string.IsNullOrEmpty(x.Discount)
-                         && x.Discount != "None")
+                         && x.Discount != "None"
+                         && !IsExcludedSku(x.SkuName))
                 .Select(x => ParseDiscountPercent(x.Discount))
                 .Where(x => x > 0)
                 .ToList();
@@ -114,6 +141,13 @@ public class LdShopDiscountService
             _logger.LogError(ex, "FetchDiscountAsync failed — commodityId={Id}", commodityId);
             return null;
         }
+    }
+
+    private static bool IsExcludedSku(string? skuName)
+    {
+        if (string.IsNullOrEmpty(skuName)) return false;
+        return ExcludedSkuKeywords.Any(kw =>
+            skuName.Contains(kw, StringComparison.OrdinalIgnoreCase));
     }
 
     private static int ParseDiscountPercent(string? discount)
@@ -140,5 +174,9 @@ public class LdShopDiscountService
 
         [JsonPropertyName("promotion")]
         public int Promotion { get; set; }
+
+        // FIX: thêm skuName để filter SKU đặc biệt
+        [JsonPropertyName("skuName")]
+        public string? SkuName { get; set; }
     }
 }
