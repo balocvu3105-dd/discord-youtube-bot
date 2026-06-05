@@ -8,9 +8,6 @@ using YouTubeDiscordBot.Services;
 
 namespace YouTubeDiscordBot.Background;
 
-/// <summary>
-/// Background worker tự động refresh shop embeds theo lịch.
-/// </summary>
 public class ShopBackgroundService : BackgroundService
 {
     private readonly IDiscordService _discord;
@@ -39,7 +36,6 @@ public class ShopBackgroundService : BackgroundService
             "ShopBackgroundService starting — Channel={ChannelId}, Refresh={Hours}h",
             _config.ShopChannelId, _config.ShopRefreshHours);
 
-        // FIX: dùng IDiscordService.WaitForReadyAsync — không cần inject concrete DiscordService
         await _discord.WaitForReadyAsync();
         _logger.LogInformation("Discord ready — ShopBackgroundService running");
 
@@ -67,8 +63,6 @@ public class ShopBackgroundService : BackgroundService
         }
     }
 
-    // ── Refresh All Shop Messages ────────────────────────────────────────────
-
     private async Task RefreshShopAsync(CancellationToken ct)
     {
         _logger.LogInformation("Refreshing shop messages...");
@@ -79,26 +73,10 @@ public class ShopBackgroundService : BackgroundService
             return;
         }
 
-        // Fetch discount mới nhất từ LDShop API (kết quả được cache)
-        // Gọi 1 lần duy nhất trước khi build tất cả embeds
         await _shopService.WarmDiscountCacheAsync();
 
         var state = await _persistence.LoadAsync();
-        var stateChanged = false;
-
-        // 1. Overview message
-        var overviewChanged = await RefreshOverviewAsync(channel, state);
-        stateChanged |= overviewChanged;
-
-        await Task.Delay(1500, ct); // Rate limit buffer
-
-        // 2. Game embeds
-        foreach (var game in _config.ShopGames)
-        {
-            var gameChanged = await RefreshGameEmbedAsync(channel, game, state);
-            stateChanged |= gameChanged;
-            await Task.Delay(2500, ct); // Rate limit buffer
-        }
+        var stateChanged = await RefreshOverviewAsync(channel, state);
 
         if (stateChanged)
             await _persistence.SaveAsync(state);
@@ -106,9 +84,6 @@ public class ShopBackgroundService : BackgroundService
         _logger.LogInformation("Shop refresh completed");
     }
 
-    // ── Overview Message ─────────────────────────────────────────────────────
-
-    /// <returns>true nếu state đã thay đổi (message ID mới)</returns>
     private async Task<bool> RefreshOverviewAsync(IMessageChannel channel, ShopMessageState state)
     {
         var (embed, components) = await _shopService.BuildOverviewAsync();
@@ -130,37 +105,6 @@ public class ShopBackgroundService : BackgroundService
 
         await existing.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
         _logger.LogInformation("Overview message updated — {MessageId}", existing.Id);
-        return false;
-    }
-
-    // ── Game Embed ───────────────────────────────────────────────────────────
-
-    /// <returns>true nếu state đã thay đổi (message ID mới)</returns>
-    private async Task<bool> RefreshGameEmbedAsync(
-        IMessageChannel channel, ShopGameConfig game, ShopMessageState state)
-    {
-        var result = await _shopService.BuildGameEmbedAsync(game);
-        if (result is null) return false;
-
-        var (embed, components) = result.Value;
-
-        IUserMessage? existing = null;
-        if (state.GameMessageIds.TryGetValue(game.Name, out var existingId))
-        {
-            try { existing = await channel.GetMessageAsync(existingId) as IUserMessage; }
-            catch { /* message bị xóa */ }
-        }
-
-        if (existing is null)
-        {
-            var msg = await channel.SendMessageAsync(embed: embed, components: components);
-            state.GameMessageIds[game.Name] = msg.Id;
-            _logger.LogInformation("[{Game}] embed created — {MessageId}", game.Name, msg.Id);
-            return true;
-        }
-
-        await existing.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
-        _logger.LogInformation("[{Game}] embed updated — {MessageId}", game.Name, existing.Id);
         return false;
     }
 }
