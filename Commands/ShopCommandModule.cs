@@ -27,7 +27,7 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
         _config = config.Value;
     }
 
-    [SlashCommand("refreshshop", "Tạo lại toàn bộ shop embeds ngay lập tức")]
+    [SlashCommand("refreshshop", "Tạo lại shop embed ngay lập tức")]
     [DefaultMemberPermissions(GuildPermission.Administrator)]
     public async Task RefreshShopAsync()
     {
@@ -41,40 +41,17 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
                 return;
             }
 
-            // Warm discount cache trước
             await _shopService.WarmDiscountCacheAsync();
 
             var state = await _persistence.LoadAsync();
 
-            // Reset state để force tạo mới (xóa message ID cũ)
+            // Reset để force tạo message mới
             state.PinnedMessageId = 0;
             state.GameMessageIds.Clear();
 
-            // Tạo lại overview
-            var (overviewEmbed, overviewComponents) = await _shopService.BuildOverviewAsync();
-            var overviewMsg = await channel.SendMessageAsync(
-                embed: overviewEmbed,
-                components: overviewComponents);
-            state.PinnedMessageId = overviewMsg.Id;
-
-            // FIX: delay nhất quán với ShopBackgroundService
-            await Task.Delay(1500);
-
-            // Tạo lại từng game embed
-            foreach (var game in _config.ShopGames)
-            {
-                var result = await _shopService.BuildGameEmbedAsync(game);
-                if (result is null) continue;
-
-                var (embed, components) = result.Value;
-                var msg = await channel.SendMessageAsync(
-                    embed: embed,
-                    components: components);
-                state.GameMessageIds[game.Name] = msg.Id;
-
-                // FIX: Thêm delay giữa các game embeds để tránh Discord rate-limit
-                await Task.Delay(2500);
-            }
+            var (embed, components) = await _shopService.BuildOverviewAsync();
+            var msg = await channel.SendMessageAsync(embed: embed, components: components);
+            state.PinnedMessageId = msg.Id;
 
             await _persistence.SaveAsync(state);
 

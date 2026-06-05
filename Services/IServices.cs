@@ -2,23 +2,10 @@ using YouTubeDiscordBot.Models;
 
 namespace YouTubeDiscordBot.Services;
 
-// ── WHY INTERFACES? ──────────────────────────────────────────────────────────
-// Interface tách "contract" (API) khỏi "implementation" (logic).
-// Lợi ích:
-//   1. Unit test dễ hơn — mock interface thay vì mock class thật
-//   2. Swap implementation dễ hơn (vd: đổi JSON → SQLite sau này)
-//   3. Đọc code dễ hơn — chỉ cần nhìn interface để biết service làm gì
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// <summary>Quản lý kết nối Discord và gửi message.</summary>
 public interface IDiscordService
 {
     Task ConnectAsync();
-
-    // FIX WARN #2: Thêm WaitForReadyAsync vào interface để BackgroundServices
-    // không cần inject concrete DiscordService chỉ để gọi method này.
     Task WaitForReadyAsync();
-
     Task SendVideoNotificationAsync(VideoInfo video);
     Task SendToChannelAsync(ulong channelId, string? text = null,
         Discord.Embed? embed = null,
@@ -27,21 +14,18 @@ public interface IDiscordService
     Discord.WebSocket.DiscordSocketClient Client { get; }
 }
 
-/// <summary>Đọc/ghi BotState (last video ID).</summary>
 public interface IPersistenceService
 {
     Task<BotState> LoadStateAsync();
     Task SaveStateAsync(BotState state);
 }
 
-/// <summary>Đọc/ghi live state cache (dictionary video ID → trạng thái).</summary>
 public interface ILiveStateService
 {
     Task<Dictionary<string, string>> LoadAsync();
     Task SaveAsync(Dictionary<string, string> state);
 }
 
-/// <summary>Tương tác với YouTube Data API v3.</summary>
 public interface IYouTubeApiService
 {
     Task<List<string>> GetLatestVideoIdsAsync();
@@ -53,10 +37,9 @@ public interface IShopService
 {
     Task WarmDiscountCacheAsync();
     Task<(Discord.Embed embed, Discord.MessageComponent components)> BuildOverviewAsync();
-    Task<(Discord.Embed embed, Discord.MessageComponent components)?> BuildGameEmbedAsync(ShopGameConfig game);
+    // BuildGameEmbedAsync đã xóa — chỉ dùng overview embed
 }
 
-/// <summary>Đọc/ghi ShopMessageState.</summary>
 public interface IShopMessagePersistenceService
 {
     Task<ShopMessageState> LoadAsync();
