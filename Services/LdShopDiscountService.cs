@@ -36,11 +36,7 @@ public class LdShopDiscountService
         "Connoisseur Channel",
     ];
 
-    // FIX BUG #2: Nhận IHttpClientFactory thay vì HttpClient trực tiếp.
-    // AddHttpClient<T> mặc định là Transient — nếu dùng ActivatorUtilities.CreateInstance
-    // để override thành Singleton thì HttpClient được tạo ngoài IHttpClientFactory,
-    // không có lifecycle management → SocketException sau vài giờ (DNS rotation bug).
-    // Với IHttpClientFactory, CreateClient() luôn trả về HttpClient được quản lý đúng cách.
+    // FIX BUG #2: IHttpClientFactory thay vì HttpClient trực tiếp
     public LdShopDiscountService(
         IHttpClientFactory httpClientFactory,
         ILogger<LdShopDiscountService> logger)
@@ -104,21 +100,29 @@ public class LdShopDiscountService
 
             var body = await response.Content.ReadAsStringAsync();
 
-            // Log raw response ở Debug level để dễ debug nếu cần
-            _logger.LogDebug("sku/page raw (commodityId={Id}): {Body}", commodityId, body);
+            // Log 300 ký tự đầu để debug structure thực tế
+            _logger.LogInformation("sku/page preview (commodityId={Id}): {Preview}",
+                commodityId, body.Length > 300 ? body[..300] : body);
 
             var result = JsonSerializer.Deserialize<SkuPageResponse>(body);
 
-            // FIX BUG #1: API trả về data.records (paged object), không phải data trực tiếp là array.
-            // Trước: result?.Data (List<SkuItem>) → luôn null vì data là object, không phải array
-            // → discounts.Count == 0 → return 0 → pct = 0 → hiển thị "Ưu đãi" thay vì % thực tế.
-            if (result?.Data?.Records is null || result.Data.Records.Count == 0)
+            if (result?.Data is null || result.Data.Count == 0)
             {
-                _logger.LogWarning("Empty records — commodityId={Id}", commodityId);
+                _logger.LogWarning("Empty data — commodityId={Id}", commodityId);
                 return null;
             }
 
-            var discounts = result.Data.Records
+            _logger.LogInformation("Total SKUs before filter (commodityId={Id}): {Count}",
+                commodityId, result.Data.Count);
+
+            foreach (var sku in result.Data.Take(5))
+            {
+                _logger.LogInformation(
+                    "  SKU sample — name={Name}, discount={Discount}, stockStatus={Stock}, excluded={Excl}",
+                    sku.SkuName, sku.Discount, sku.StockStatus, IsExcludedSku(sku.SkuName));
+            }
+
+            var discounts = result.Data
                 .Where(x => x.StockStatus == 1
                          && !string.IsNullOrEmpty(x.Discount)
                          && x.Discount != "None"
@@ -129,16 +133,12 @@ public class LdShopDiscountService
 
             if (discounts.Count == 0)
             {
-                _logger.LogInformation("No discount found — commodityId={Id}", commodityId);
+                _logger.LogInformation("No discount found after filter — commodityId={Id}", commodityId);
                 return 0;
             }
 
             var maxDiscount = discounts.Max();
-
-            _logger.LogInformation(
-                "Discount fetched — commodityId={Id}, max={Pct}%",
-                commodityId, maxDiscount);
-
+            _logger.LogInformation("Discount fetched — commodityId={Id}, max={Pct}%", commodityId, maxDiscount);
             return maxDiscount;
         }
         catch (Exception ex)
@@ -158,29 +158,18 @@ public class LdShopDiscountService
     private static int ParseDiscountPercent(string? discount)
     {
         if (string.IsNullOrEmpty(discount) || discount == "None") return 0;
+        // Format API trả về: "28%OFF" → lấy số trước %
         var idx = discount.IndexOf('%');
         if (idx <= 0) return 0;
         return int.TryParse(discount[..idx], out var pct) ? pct : 0;
     }
 
-    // FIX BUG #1: Đúng cấu trúc JSON của API v4/sku/page:
-    // {
-    //   "data": {
-    //     "records": [...],   ← array SKU ở đây
-    //     "total": 100,
-    //     ...
-    //   }
-    // }
+    // REVERT: data là array trực tiếp, không phải object có records
+    // Confirmed từ curl: {"code":200,"msg":"success","data":[{...}]}
     private class SkuPageResponse
     {
         [JsonPropertyName("data")]
-        public SkuPageData? Data { get; set; }
-    }
-
-    private class SkuPageData
-    {
-        [JsonPropertyName("records")]
-        public List<SkuItem>? Records { get; set; }
+        public List<SkuItem>? Data { get; set; }
     }
 
     private class SkuItem
