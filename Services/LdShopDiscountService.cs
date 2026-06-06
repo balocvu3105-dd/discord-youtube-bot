@@ -15,11 +15,6 @@ public class LdShopDiscountService
 
     private readonly ConcurrentDictionary<int, int> _cache = new();
 
-    // SKU name keywords bị loại trừ khi tính badge discount.
-    // Web LDShop badge chỉ tính SKU nạp thông thường, không tính:
-    //   - New User Exclusive (chỉ dành cho người mới)
-    //   - Bundle / Guarantee / Collection / Pack / Outfit / Subscription / Upgrade
-    //     (là các sản phẩm đặc biệt, không phải top-up currency thông thường)
     private static readonly string[] ExcludedSkuKeywords =
     [
         "New User Exclusive",
@@ -97,7 +92,7 @@ public class LdShopDiscountService
             if (!response.IsSuccessStatusCode)
             {
                 var errorBody = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("HTTP {Status} from sku/page (commodityId={Id}) — body: {Body}",
+                _logger.LogWarning("HTTP {Status} from sku/page (commodityId={Id}) � body: {Body}",
                     (int)response.StatusCode, commodityId, errorBody);
                 return null;
             }
@@ -107,12 +102,10 @@ public class LdShopDiscountService
 
             if (result?.Data is null || result.Data.Count == 0)
             {
-                _logger.LogWarning("Empty data — commodityId={Id}", commodityId);
+                _logger.LogWarning("Empty data � commodityId={Id}", commodityId);
                 return null;
             }
 
-            // FIX: Chỉ lấy SKU nạp currency thông thường (có hàng, có discount, không phải bundle/exclusive/pack đặc biệt)
-            // Web badge LDShop không tính các SKU dạng Bundle, Guarantee, New User Exclusive,...
             var discounts = result.Data
                 .Where(x => x.StockStatus == 1
                          && !string.IsNullOrEmpty(x.Discount)
@@ -124,21 +117,21 @@ public class LdShopDiscountService
 
             if (discounts.Count == 0)
             {
-                _logger.LogInformation("No discount found — commodityId={Id}", commodityId);
+                _logger.LogInformation("No discount found � commodityId={Id}", commodityId);
                 return 0;
             }
 
             var maxDiscount = discounts.Max();
 
             _logger.LogInformation(
-                "Discount fetched — commodityId={Id}, max={Pct}%",
+                "Discount fetched � commodityId={Id}, max={Pct}%",
                 commodityId, maxDiscount);
 
             return maxDiscount;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "FetchDiscountAsync failed — commodityId={Id}", commodityId);
+            _logger.LogError(ex, "FetchDiscountAsync failed � commodityId={Id}", commodityId);
             return null;
         }
     }
@@ -175,7 +168,6 @@ public class LdShopDiscountService
         [JsonPropertyName("promotion")]
         public int Promotion { get; set; }
 
-        // FIX: thêm skuName để filter SKU đặc biệt
         [JsonPropertyName("skuName")]
         public string? SkuName { get; set; }
     }

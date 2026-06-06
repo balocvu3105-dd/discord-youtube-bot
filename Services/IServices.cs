@@ -37,7 +37,7 @@ public interface IShopService
 {
     Task WarmDiscountCacheAsync();
     Task<(Discord.Embed embed, Discord.MessageComponent components)> BuildOverviewAsync();
-    // BuildGameEmbedAsync đã xóa — chỉ dùng overview embed
+    Task<(Discord.Embed embed, Discord.MessageComponent components)?> BuildGameEmbedAsync(ShopGameConfig game);
 }
 
 public interface IShopMessagePersistenceService

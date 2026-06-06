@@ -24,12 +24,27 @@ public class ShopService : IShopService
 
     public async Task WarmDiscountCacheAsync()
     {
-        var games = _config.ShopGames
+        var pairs = _config.ShopGames
             .Where(g => g.CommodityId > 0 && g.SkuLabelId > 0)
             .Select(g => (g.CommodityId, g.SkuLabelId));
 
-        await _discountService.WarmCacheAsync(games);
-        _logger.LogInformation("Discount cache warmed for {Count} games", _config.ShopGames.Count);
+        await _discountService.WarmCacheAsync(pairs);
+    }
+
+    private int ResolveDiscount(ShopGameConfig game)
+    {
+        var apiPct = _discountService.GetDiscount(game.CommodityId);
+
+        if (apiPct.HasValue)
+        {
+            _logger.LogDebug("[{Game}] discount from API: {Pct}%", game.Name, apiPct.Value);
+            return apiPct.Value;
+        }
+
+        _logger.LogWarning(
+            "[{Game}] API discount không có — fallback appsettings: {Pct}%",
+            game.Name, game.DiscountPercent);
+        return game.DiscountPercent;
     }
 
     public Task<(Embed embed, MessageComponent components)> BuildOverviewAsync()
@@ -44,13 +59,6 @@ public class ShopService : IShopService
         sb.AppendLine("• Không đóng trình duyệt khi thanh toán");
         sb.AppendLine();
         sb.AppendLine("💡 Nếu đăng nhập sau khi bấm link, hệ thống có thể không ghi nhận hỗ trợ.");
-
-        if (!string.IsNullOrWhiteSpace(_config.ShopNotice))
-        {
-            sb.AppendLine();
-            sb.AppendLine($"📢 {_config.ShopNotice}");
-        }
-
         sb.AppendLine();
         sb.AppendLine("🎮 Chọn game bên dưới để bắt đầu nạp");
 
@@ -63,7 +71,7 @@ public class ShopService : IShopService
 
         foreach (var game in _config.ShopGames)
         {
-            var pct = _discountService.GetDiscount(game.CommodityId) ?? game.DiscountPercent;
+            var pct = ResolveDiscount(game);
             embed.AddField(
                 $"{game.Emoji} {game.Name}",
                 pct > 0 ? $"🔥 -{pct}%" : "🔥 Ưu đãi",
@@ -80,5 +88,49 @@ public class ShopService : IShopService
         }
 
         return Task.FromResult((embed.Build(), buttons.Build()));
+    }
+
+    public Task<(Embed embed, MessageComponent components)?> BuildGameEmbedAsync(ShopGameConfig game)
+    {
+        var pct = ResolveDiscount(game);
+
+        var sb = new System.Text.StringBuilder();
+
+        if (!string.IsNullOrWhiteSpace(game.PromoNote))
+        {
+            sb.AppendLine($"💬 {game.PromoNote}");
+            sb.AppendLine();
+        }
+
+        if (pct > 0)
+            sb.AppendLine($"🔥 Giảm {pct}% qua LDShop");
+
+        if (!string.IsNullOrWhiteSpace(game.TopUpType))
+            sb.AppendLine($"⚡ {game.TopUpType}");
+
+        if (!string.IsNullOrWhiteSpace(game.Warning))
+        {
+            sb.AppendLine();
+            sb.AppendLine(game.Warning);
+        }
+
+        var titleDiscount = pct > 0 ? $" — Giảm {pct}%!" : string.Empty;
+
+        var embed = new EmbedBuilder()
+            .WithTitle($"{game.Emoji} {game.Name}{titleDiscount}")
+            .WithDescription(sb.ToString())
+            .WithColor(new Color(255, 140, 0))
+            .WithFooter($"LDShop x {game.Name}")
+            .WithCurrentTimestamp()
+            .Build();
+
+        var components = new ComponentBuilder()
+            .WithButton(
+                label: $"🛒 Nạp {game.Name} ngay",
+                style: ButtonStyle.Link,
+                url: game.AffiliateLink)
+            .Build();
+
+        return Task.FromResult<(Embed, MessageComponent)?>((embed, components));
     }
 }
