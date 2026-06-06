@@ -66,7 +66,9 @@ public class LdShopDiscountService
         foreach (var (commodityId, skuLabelId) in games)
         {
             var pct = await FetchDiscountAsync(commodityId, skuLabelId);
-            if (pct.HasValue)
+            // Chỉ cache khi pct > 0 — nếu API trả về 0 (no discount found)
+            // thì KHÔNG cache, để ResolveDiscount fallback về DiscountPercent trong appsettings.
+            if (pct.HasValue && pct.Value > 0)
                 _cache[commodityId] = (int)Math.Round(pct.Value);
         }
     }
