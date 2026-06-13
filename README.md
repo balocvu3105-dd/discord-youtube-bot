@@ -1,49 +1,40 @@
 # YouTube Discord Bot
 
-![Build](https://github.com/balocvu3105-dd/discord-youtube-bot/actions/workflows/dotnet.yml/badge.svg)
-![.NET](https://img.shields.io/badge/.NET-8-blue)
-![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
+A production-ready Discord bot built with **.NET 8** that automatically sends notifications to Discord channels when a YouTube channel uploads a new video or goes live. Also tracks game top-up promotions from LDShop.
+
+> **Discord bot tự động thông báo** khi kênh YouTube đăng video mới hoặc livestream.  
+> Tích hợp theo dõi khuyến mãi nạp game LDShop.
+
+[![Build](https://github.com/balocvu3105-dd/discord-youtube-bot/actions/workflows/dotnet.yml/badge.svg)](https://github.com/balocvu3105-dd/discord-youtube-bot/actions/workflows/dotnet.yml)
+![.NET](https://img.shields.io/badge/.NET-8-512BD4?logo=dotnet)
+![Docker](https://img.shields.io/badge/Docker-Enabled-2496ED?logo=docker)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-Production-ready Discord bot built with .NET for:
-
-- YouTube video notifications
-- YouTube livestream alerts
-- LDShop promo tracking
-- Persistent runtime state
-- Background services
-- Docker deployment
-
 ---
 
-# Features
+## Features / Tính năng
 
-## YouTube Notifications
-
-- Detect new uploads
-- Detect livestreams
-- Auto send embeds to Discord channels
-- Prevent duplicate notifications
+### YouTube Notifications
+- Detect new video uploads and send embeds to Discord
+- Detect livestream start and send live alerts
+- Prevent duplicate notifications across bot restarts
 - Persistent state storage
 
-## LDShop Tracking
-
-- Track game top-up promotions
-- Refresh shop data automatically
-- Slash command refresh support
+### LDShop Tracking
+- Track game top-up promotions automatically
+- Refresh shop data on schedule
+- `/refreshshop` slash command for manual refresh
 - Config-driven game list
 
-## Reliability
-
-- Background workers
-- JSON persistence
-- Logging support
-- Docker support
-- Restart-safe state handling
+### Reliability
+- Background worker services
+- Restart-safe state handling via JSON persistence
+- Structured logging with Serilog
+- Docker-ready deployment
 
 ---
 
-# Tech Stack
+## Tech Stack
 
 - .NET 8
 - Discord.Net
@@ -54,43 +45,39 @@ Production-ready Discord bot built with .NET for:
 
 ---
 
-# Project Structure
+## Project Structure / Cấu trúc
 
-```txt
-Background/     -> background workers
-Commands/       -> slash commands
-Config/         -> configuration models
-Models/         -> data models
-Services/       -> business logic/services
-data/           -> runtime state storage
-logs/           -> runtime logs
+```
+Background/     → background worker services
+Commands/       → slash commands
+Config/         → configuration models
+Models/         → data models
+Services/       → business logic
+data/           → runtime state storage (git-ignored)
+logs/           → runtime logs (git-ignored)
 ```
 
 ---
 
-# Setup
+## Setup / Cài đặt
 
-## Clone Repository
+### Clone
 
 ```bash
 git clone https://github.com/balocvu3105-dd/discord-youtube-bot.git
 cd discord-youtube-bot
 ```
 
----
+### Environment Variables
 
-# Environment Variables
-
-Create `.env`
+Create `.env`:
 
 ```env
 BotConfiguration__DiscordToken=YOUR_DISCORD_TOKEN
 BotConfiguration__YoutubeApiKey=YOUR_YOUTUBE_API_KEY
 ```
 
----
-
-# appsettings.json
+### appsettings.json
 
 ```json
 {
@@ -102,88 +89,61 @@ BotConfiguration__YoutubeApiKey=YOUR_YOUTUBE_API_KEY
 }
 ```
 
----
-
-# Run Locally
+### Run locally
 
 ```bash
 dotnet restore
 dotnet run
 ```
 
----
-
-# Docker
-
-## Build
+### Docker
 
 ```bash
 docker build -t youtube-discord-bot .
-```
-
-## Run
-
-```bash
 docker run --env-file .env youtube-discord-bot
 ```
 
 ---
 
-# Slash Commands
+## Slash Commands
 
-## Refresh Shop
+| Command | Description |
+|---|---|
+| `/refreshshop` | Force refresh LDShop promotions |
 
-```txt
-/refreshshop
+---
+
+## State Files
+
+Runtime state is persisted in:
+
+```
+data/last_video_state.json   → last known video ID
+data/live_state.json         → current livestream state
 ```
 
-Force refresh LDShop promotions.
+These files are git-ignored and managed automatically.
 
 ---
 
-# State Files
+## Production Notes
 
-Runtime state is stored in:
-
-```txt
-data/last_video_state.json
-data/live_state.json
-```
-
-These files are ignored by git.
+- Persistent state prevents duplicate notifications across restarts
+- Restart-safe recovery via JSON state files
+- Docker-ready, config-driven architecture
 
 ---
 
-# Logging
+## Future Plans
 
-Logs are written to:
-
-```txt
-logs/
-```
-
----
-
-# Production Notes
-
-- Uses persistent state to prevent duplicate notifications
-- Supports restart-safe recovery
-- Docker-ready deployment
-- Config-driven architecture
-
----
-
-# Future Plans
-
+- Database support (replace JSON persistence)
+- Multi-channel notification system
 - Telegram adapter
 - Web dashboard
-- Multi-channel notification system
-- Database support
-- Premium features
 - Webhook support
 
 ---
 
-# License
+## License
 
 MIT
