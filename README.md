@@ -7,26 +7,26 @@
 
 A production-grade Discord bot built with **.NET 8** and **C#**, deployed on a Linux VPS via Docker. It handles YouTube channel monitoring and an extensible multi-provider game shop discount board with affiliate link tracking and scheduled embed refresh.
 
-The shop system is designed around a **provider pattern** — currently integrating **LDShop** and **Lootbar**, with the architecture ready to onboard additional shops (Codashop, Midasbuy, Garena, etc.) by adding a single class.
+The shop system is built around a **provider pattern** — currently integrating **LDShop** and **Lootbar**, with the architecture ready to add new shops (Codashop, Midasbuy, Garena, etc.) by implementing a single interface.
 
-> **Live in production** — serving an active Discord community for a game top-up affiliate shop.
+> **Live in production** — serving an active Vietnamese Discord community for a game top-up affiliate shop.
 
 ---
 
 ## Features
 
 ### YouTube Monitoring
-- Polls YouTube Data API v3 on a configurable interval to detect new video uploads and livestream events
-- Sends rich Discord embeds to dedicated channels with full deduplication
+- Polls YouTube Data API v3 on a configurable interval to detect new video uploads and livestream start/end events
+- Sends rich Discord embeds to dedicated channels with role pings and full deduplication
 - Restart-safe: survives container restarts without re-sending notifications via persistent JSON state
 
 ### Multi-Provider Game Shop Discount Board
-- Aggregates real-time discount data from multiple independent shop providers (currently **LDShop** and **Lootbar**)
+- Aggregates real-time discount data from multiple independent shop providers (**LDShop** and **Lootbar**)
 - Each provider renders its own Discord embed with live discount percentages and affiliate buttons
-- Extensible by design: adding a new shop (Codashop, Midasbuy, Garena, etc.) requires only implementing `IShopDiscountProvider` — no changes to existing code
-- Scheduled auto-refresh at 00:00 and 12:00 (Vietnam time, UTC+7) via a `BackgroundService`
+- Extensible by design: adding a new shop requires only implementing `IShopDiscountProvider` — no changes to existing code
+- Scheduled auto-refresh at **00:00** and **12:00** (Vietnam time, UTC+7) via a `BackgroundService`
 - `/refreshshop` slash command (Admin only) for on-demand refresh — edits existing messages in-place, never creates duplicates
-- Persists Discord message IDs to `ShopMessageState` so embeds survive bot restarts
+- Persists Discord message IDs so embeds survive bot restarts
 
 ---
 
@@ -68,7 +68,7 @@ The shop system is designed around a **provider pattern** — currently integrat
 | Discord | Discord.Net (Interactions API) |
 | External APIs | YouTube Data API v3, LDShop API, Lootbar API |
 | HTTP | `IHttpClientFactory` + Polly standard resilience pipeline |
-| Logging | Serilog (structured console + daily rolling file) |
+| Logging | Serilog (structured console + daily rolling file, 7-day retention) |
 | Configuration | `IOptions<T>` with DataAnnotations validation on startup |
 | Background jobs | `IHostedService` / `BackgroundService` |
 | Containerization | Docker, docker-compose |
@@ -79,9 +79,9 @@ The shop system is designed around a **provider pattern** — currently integrat
 
 ## Design Patterns
 
-**Provider / Strategy** — `IShopDiscountProvider` defines a uniform interface; `LdShopDiscountProvider` and `LootbarDiscountProvider` are two current implementations composed by `ShopDiscountAggregator`. Adding a new shop (Codashop, Midasbuy, Garena, etc.) requires only a new class registered with DI — zero changes to existing code (Open/Closed Principle). The aggregator runs all providers in parallel via `Task.WhenAll`.
+**Provider / Strategy** — `IShopDiscountProvider` defines a uniform interface; `LdShopDiscountProvider` and `LootbarDiscountProvider` are two current implementations composed by `ShopDiscountAggregator`. Adding a new shop requires only a new class registered with DI — zero changes to existing code (Open/Closed Principle). The aggregator runs all providers in parallel via `Task.WhenAll`.
 
-**IHttpClientFactory** — each external API gets its own named `HttpClient` with provider-specific headers, compression (`GZip`/`Deflate`), and Polly standard resilience (retry with exponential backoff + circuit breaker).
+**IHttpClientFactory** — each external API gets its own named `HttpClient` with provider-specific headers, GZip/Deflate decompression, and Polly standard resilience (retry with exponential backoff + circuit breaker).
 
 **Options pattern** — all configuration is bound from `appsettings.json` via `IOptions<BotConfiguration>`, with `ValidateDataAnnotations()` and `ValidateOnStart()` to catch misconfiguration at boot rather than at runtime.
 
@@ -95,33 +95,38 @@ The shop system is designed around a **provider pattern** — currently integrat
 
 ```
 Background/
-  ShopBackgroundService.cs          # Scheduled shop refresh (timezone-aware)
-  YouTubeCheckerBackgroundService.cs
+  ShopBackgroundService.cs           # Scheduled shop refresh (timezone-aware, 00:00 & 12:00 VN)
+  YouTubeCheckerBackgroundService.cs # Polls YouTube API for new videos and live events
 
 Commands/
-  ShopCommandModule.cs              # /refreshshop slash command
+  ShopCommandModule.cs               # /refreshshop slash command
 
 Config/
-  BotConfiguration.cs               # Strongly-typed configuration model
+  BotConfiguration.cs                # Strongly-typed configuration model
 
 Models/
-  Models.cs                         # ShopGameConfig, ShopMessageState, etc.
+  Models.cs                          # ShopGameConfig, ShopMessageState, etc.
 
 Services/
-  IServices.cs                      # Service & provider interfaces
-  ShopService.cs                    # Builds Discord embeds for LDShop & Lootbar
-  ShopDiscountAggregator.cs         # Composes IShopDiscountProvider list
+  IServices.cs                       # Service & provider interfaces
+  IShopDiscountProvider.cs           # Shop provider contract
+  ShopService.cs                     # Builds Discord embeds for LDShop & Lootbar
+  ShopDiscountAggregator.cs          # Composes IShopDiscountProvider list, runs in parallel
   LdShopDiscountProvider.cs
-  LdShopDiscountService.cs          # LDShop HTTP API client
+  LdShopDiscountService.cs           # LDShop HTTP API client
   LootbarDiscountProvider.cs
-  LootbarDiscountService.cs         # Lootbar HTTP API client (app_service_id mapping)
-  ShopMessagePersistenceService.cs  # Persists Discord message IDs
-  DiscordService.cs
-  YouTubeApiService.cs
-  AsyncJsonStore.cs                 # Thread-safe generic JSON persistence base class
+  LootbarDiscountService.cs          # Lootbar HTTP API client (app_service_id mapping)
+  LootbarScraperService.cs           # Lootbar HTML scraper fallback
+  ShopMessagePersistenceService.cs   # Persists Discord message IDs to JSON
+  DiscordService.cs                  # Discord client connection & event wiring
+  YouTubeApiService.cs               # YouTube Data API v3 wrapper
+  LiveStateService.cs                # Tracks current live stream state
+  PersistenceService.cs              # Last-video-state persistence
+  AsyncJsonStore.cs                  # Thread-safe generic JSON persistence base class
 
-Program.cs                          # DI composition root
+Program.cs                           # DI composition root
 Dockerfile
+appsettings.json
 ```
 
 ---
@@ -130,35 +135,105 @@ Dockerfile
 
 ### Prerequisites
 
-- .NET 8 SDK
+- [.NET 8 SDK](https://dotnet.microsoft.com/download)
 - Docker & docker-compose
-- Discord Bot Token (with `applications.commands` and `bot` scopes)
-- YouTube Data API v3 Key
+- A Discord Bot Token — create one at the [Discord Developer Portal](https://discord.com/developers/applications)
+  - Required scopes: `bot`, `applications.commands`
+  - Required bot permissions: `Send Messages`, `Embed Links`, `Mention Everyone` (for role pings)
+  - Required gateway intents: `GUILDS`, `GUILD_MESSAGES`
+- A [YouTube Data API v3](https://console.cloud.google.com/) key
 
 ### Environment Variables
 
-Create `.env` next to `docker-compose.yml`:
+Create `.env` next to `docker-compose.yml` (or `appsettings.json` for local dev). **Never commit secrets to git.**
 
 ```env
-BotConfiguration__DiscordToken=YOUR_DISCORD_TOKEN
+BotConfiguration__DiscordToken=YOUR_DISCORD_BOT_TOKEN
 BotConfiguration__YoutubeApiKey=YOUR_YOUTUBE_API_KEY
 ```
 
 ### Configuration
 
-Edit `appsettings.json` to set channel IDs, YouTube channel ID, and game list. Each game entry:
+All other settings live in `appsettings.json`:
 
 ```json
 {
-  "Name": "Wuthering Waves",
-  "Emoji": "🌊",
-  "AffiliateLink": "https://...",
-  "DiscountPercent": 10,
-  "TopUpType": "LDShop login-assisted",
-  "LootbarGameSeo": "wuthering-waves",
-  "LootbarAffiliateLink": "https://...",
-  "LootbarAppServiceId": 89
+  "BotConfiguration": {
+    "DiscordToken": "",
+    "YoutubeApiKey": "",
+    "YoutubeChannelId": "UCxxxxxxxxxxxxxxx",
+
+    "LiveChannelId":  1234567890123456789,
+    "VideoChannelId": 1234567890123456789,
+    "ShopChannelId":  1234567890123456789,
+
+    "LiveRoleId":  1234567890123456789,
+    "VideoRoleId": 1234567890123456789,
+
+    "CheckIntervalSeconds": 120,
+
+    "StateFilePath":     "data/last_video_state.json",
+    "LiveStateFilePath": "data/live_state.json",
+
+    "ShopNotice": "Optional announcement text shown above the shop embeds",
+
+    "LootbarShopCode": "YourShopCode",
+    "LootbarShopLink": "https://www.lootbar.com/shop/YourShopCode",
+
+    "ShopGames": [
+      {
+        "Name":         "Wuthering Waves",
+        "Emoji":        "🌊",
+        "CommodityId":  10016,
+        "SkuLabelId":   74,
+        "AffiliateLink": "https://chain.ldshop.gg/...",
+        "DiscountPercent": 10,
+        "PromoNote":    "Tiết kiệm ngay khi nạp Lunite!",
+        "TopUpType":    "LDShop đăng nhập hộ",
+        "Warning":      "⚠️ Không đăng nhập game trong lúc đang xử lý",
+        "LootbarGameSeo":       "wuthering-waves",
+        "LootbarAffiliateLink": "https://www.lootbar.com/top-up/wuthering-waves?shop_code=YourCode",
+        "LootbarFallbackDiscount": 0,
+        "LootbarAppServiceId":  89
+      }
+    ]
+  }
 }
+```
+
+| Field | Description |
+|---|---|
+| `YoutubeChannelId` | The YouTube channel ID to monitor (`UC...`) |
+| `LiveChannelId` / `VideoChannelId` | Discord channel IDs for live/video notifications |
+| `ShopChannelId` | Discord channel ID where shop embeds are posted |
+| `LiveRoleId` / `VideoRoleId` | Role IDs to ping on new livestream / video |
+| `CheckIntervalSeconds` | How often to poll YouTube API (default: 120s) |
+| `ShopNotice` | Optional text pinned above shop embeds (e.g. promotions) |
+| `LootbarShopCode` | Your Lootbar shop referral code |
+| `CommodityId` / `SkuLabelId` | LDShop internal IDs for the game's discount lookup |
+| `LootbarAppServiceId` | Lootbar's `app_service_id` for the game |
+| `LootbarFallbackDiscount` | Fallback discount % if Lootbar API returns no data |
+
+### Docker Compose (Production)
+
+Create `docker-compose.yml` next to `Dockerfile`:
+
+```yaml
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+```
+
+Then deploy:
+
+```bash
+docker compose up --build -d
+docker compose logs -f
 ```
 
 ### Run Locally
@@ -168,20 +243,13 @@ dotnet restore
 dotnet run
 ```
 
-### Docker (Production)
-
-```bash
-docker compose up --build -d
-docker compose logs -f
-```
-
 ---
 
 ## Slash Commands
 
 | Command | Permission | Description |
 |---|---|---|
-| `/refreshshop` | Administrator | Force-refresh both shop embeds in-place (no new messages created) |
+| `/refreshshop` | Administrator | Force-refresh all shop embeds in-place (no duplicate messages) |
 
 ---
 
@@ -191,12 +259,24 @@ GitHub Actions runs on every push to `main`: restore → build Release → valid
 
 ---
 
+## Adding a New Shop Provider
+
+1. Create `Services/NewShopDiscountProvider.cs` implementing `IShopDiscountProvider`
+2. Register in `Program.cs`:
+   ```csharp
+   builder.Services.AddSingleton<IShopDiscountProvider, NewShopDiscountProvider>();
+   ```
+3. Done — `ShopDiscountAggregator` picks it up automatically. No other changes needed.
+
+---
+
 ## Notable Implementation Details
 
-- **Timezone-aware scheduling**: next refresh is calculated in Vietnam Standard Time (UTC+7) using `TimeZoneInfo`, correctly handling midnight boundary.
+- **Timezone-aware scheduling**: next refresh is calculated in Vietnam Standard Time (UTC+7) using `TimeZoneInfo`, correctly handling the midnight boundary.
 - **Lazy IEnumerable guard**: provider list is materialized with `.ToList()` before `Task.WhenAll` — without this, LINQ deferred execution silently skipped providers on the first run.
 - **Async ref workaround**: `UpsertMessageAsync` returns `(bool changed, ulong messageId)` instead of `ref ulong` — async methods cannot have `ref` parameters in C#.
 - **Resilience**: all external HTTP calls go through Polly's `AddStandardResilienceHandler` — automatic retries with exponential backoff and circuit breaking on transient failures.
+- **Structured logging**: Serilog writes JSON-structured logs to both console and daily rolling files (7-day retention), with Discord and Microsoft noise suppressed to `Warning` level.
 
 ---
 
