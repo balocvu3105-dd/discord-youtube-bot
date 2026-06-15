@@ -19,7 +19,11 @@ public class LootbarDiscountProvider : IShopDiscountProvider
     }
 
     public async Task WarmAsync(IEnumerable<ShopGameConfig> games, CancellationToken ct = default)
-        => await _service.WarmCacheAsync(_config.LootbarShopCode);
+    {
+        // Diagnostic: xác nhận provider được gọi
+        Console.WriteLine($"[DIAG] LootbarDiscountProvider.WarmAsync called — shopCode='{_config.LootbarShopCode}'");
+        await _service.WarmCacheAsync(_config.LootbarShopCode);
+    }
 
     public int? GetDiscount(ShopGameConfig game)
     {

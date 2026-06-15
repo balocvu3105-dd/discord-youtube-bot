@@ -24,7 +24,11 @@ public class ShopDiscountAggregator
     public async Task WarmAllAsync(IEnumerable<ShopGameConfig> games, CancellationToken ct = default)
     {
         var gameList = games.ToList();
-        var tasks = _providers.Select(async provider =>
+        var providerList = _providers.ToList();
+        _logger.LogInformation("WarmAllAsync: {Count} providers — [{Names}]",
+            providerList.Count, string.Join(", ", providerList.Select(p => p.Name)));
+
+        var tasks = providerList.Select(async provider =>
         {
             try { await provider.WarmAsync(gameList, ct); }
             catch (Exception ex)

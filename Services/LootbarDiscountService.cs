@@ -36,7 +36,11 @@ public class LootbarDiscountService
 
     public async Task WarmCacheAsync(string shopCode)
     {
-        if (string.IsNullOrWhiteSpace(shopCode)) return;
+        if (string.IsNullOrWhiteSpace(shopCode))
+        {
+            _logger.LogWarning("LootbarDiscountService.WarmCacheAsync: shopCode is empty — skipping");
+            return;
+        }
 
         var url = string.Format(SaveRateUrlTemplate, shopCode);
 
