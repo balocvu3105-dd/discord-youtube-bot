@@ -52,10 +52,16 @@ public class BotConfiguration
     public string LiveStateFilePath { get; set; } = "data/live_state.json";
 
     // ── Shop ─────────────────────────────────────────────────────────────
-    [Range(1, 168, ErrorMessage = "ShopRefreshHours phải từ 1 đến 168")]
-    public int ShopRefreshHours { get; set; } = 24;
+    // Shop refresh chạy cố định lúc 00:00 và 12:00 (giờ VN) — không cần config.
 
     public string ShopNotice { get; set; } = string.Empty;
+
+    // ── Lootbar ──────────────────────────────────────────────────────────
+    /// <summary>Mã shop affiliate Lootbar, e.g. "CataWuwa".</summary>
+    public string LootbarShopCode { get; set; } = string.Empty;
+
+    /// <summary>Link shop chính dùng làm fallback khi game không có LootbarAffiliateLink.</summary>
+    public string LootbarShopLink { get; set; } = string.Empty;
 
     public List<ShopGameConfig> ShopGames { get; set; } = new();
 }

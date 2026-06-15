@@ -51,6 +51,23 @@ public class ShopGameConfig
 	/// </summary>
 	[System.Text.Json.Serialization.JsonIgnore]
 	public string CommoditySeo { get; set; } = string.Empty;
+
+	// ── Lootbar ──────────────────────────────────────────────────────────
+	/// <summary>
+	/// Slug game trên Lootbar, e.g. "wuthering-waves".
+	/// Dùng để match với API response và build link.
+	/// Để trống = Lootbar disabled cho game này.
+	/// </summary>
+	public string LootbarGameSeo { get; set; } = string.Empty;
+
+	/// <summary>
+	/// Affiliate link riêng cho game này trên Lootbar.
+	/// Nếu để trống sẽ dùng LootbarShopLink trong BotConfiguration.
+	/// </summary>
+	public string LootbarAffiliateLink { get; set; } = string.Empty;
+
+	/// <summary>Fallback % giảm giá Lootbar khi API không trả được.</summary>
+	public int LootbarFallbackDiscount { get; set; }
 }
 
 public class ShopMessageState

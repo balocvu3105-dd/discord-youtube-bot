@@ -8,7 +8,11 @@ namespace YouTubeDiscordBot.Services;
 
 public class LdShopDiscountService
 {
-    private readonly HttpClient _httpClient;
+    // Lưu factory thay vì HttpClient instance.
+    // Mỗi lần FetchDiscountAsync được gọi sẽ tạo HttpClient mới từ factory,
+    // đảm bảo HttpMessageHandler được rotate đúng chu kỳ (2 phút mặc định)
+    // → tránh DNS staleness khi bot chạy liên tục nhiều ngày.
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<LdShopDiscountService> _logger;
 
     private const string SkuPageUrl = "https://api.ldshop.gg/api/commodity/v4/sku/page";
@@ -36,29 +40,12 @@ public class LdShopDiscountService
         "Connoisseur Channel",
     ];
 
-    // FIX BUG #2: IHttpClientFactory thay vì HttpClient trực tiếp
     public LdShopDiscountService(
         IHttpClientFactory httpClientFactory,
         ILogger<LdShopDiscountService> logger)
     {
-        _httpClient = httpClientFactory.CreateClient(nameof(LdShopDiscountService));
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
-
-        _httpClient.DefaultRequestHeaders.Clear();
-        _httpClient.DefaultRequestHeaders.Add("User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
-        _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
-        _httpClient.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
-        _httpClient.DefaultRequestHeaders.Add("Origin", "https://www.ldshop.gg");
-        _httpClient.DefaultRequestHeaders.Add("Referer", "https://www.ldshop.gg/");
-        _httpClient.DefaultRequestHeaders.Add("Channel", "ldshop");
-        _httpClient.DefaultRequestHeaders.Add("Currency", "VND");
-        _httpClient.DefaultRequestHeaders.Add("Cversion", "v2");
-        _httpClient.DefaultRequestHeaders.Add("Language", "vn");
-        _httpClient.DefaultRequestHeaders.Add("Source", "pc");
-        _httpClient.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "empty");
-        _httpClient.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "cors");
-        _httpClient.DefaultRequestHeaders.Add("Sec-Fetch-Site", "same-site");
     }
 
     public async Task WarmCacheAsync(IEnumerable<(int commodityId, int skuLabelId)> games)
@@ -90,7 +77,10 @@ public class LdShopDiscountService
             var json = JsonSerializer.Serialize(payload);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync(SkuPageUrl, content);
+            // Tạo client mới mỗi request — factory quản lý handler pool,
+            // HttpClient instance được dispose sau khi dùng xong.
+            using var httpClient = _httpClientFactory.CreateClient(nameof(LdShopDiscountService));
+            var response = await httpClient.PostAsync(SkuPageUrl, content);
 
             if (!response.IsSuccessStatusCode)
             {

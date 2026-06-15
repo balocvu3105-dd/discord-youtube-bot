@@ -77,28 +77,70 @@ try
     builder.Services.AddSingleton<IShopMessagePersistenceService, ShopMessagePersistenceService>();
 
     // ── HTTP Clients ─────────────────────────────────────────────────────
-    // LdShopScraperService — giữ đăng ký để không break nếu dùng lại sau
-    builder.Services.AddHttpClient<LdShopScraperService>()
-        .AddStandardResilienceHandler();
 
-    // FIX BUG #2: Đăng ký named HttpClient cho LdShopDiscountService.
-    //
-    // Trước: AddHttpClient<T> (Transient) + ActivatorUtilities.CreateInstance (Singleton override)
-    //   → HttpClient được tạo ngoài IHttpClientFactory → không có lifecycle management
-    //   → SocketException sau vài giờ chạy (DNS rotation bug của HttpClient).
-    //
-    // Sau: Named client + AddSingleton bình thường.
-    //   LdShopDiscountService nhận IHttpClientFactory, tự gọi CreateClient() trong constructor.
-    //   IHttpClientFactory quản lý HttpMessageHandler pool đúng cách → không bao giờ bị stale socket.
+    // LDShop
     builder.Services.AddHttpClient(nameof(LdShopDiscountService))
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
         {
             AutomaticDecompression = System.Net.DecompressionMethods.GZip |
                                      System.Net.DecompressionMethods.Deflate
         })
+        .ConfigureHttpClient(client =>
+        {
+            client.DefaultRequestHeaders.Add("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+            client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+            client.DefaultRequestHeaders.Add("Origin", "https://www.ldshop.gg");
+            client.DefaultRequestHeaders.Add("Referer", "https://www.ldshop.gg/");
+            client.DefaultRequestHeaders.Add("Channel", "ldshop");
+            client.DefaultRequestHeaders.Add("Currency", "VND");
+            client.DefaultRequestHeaders.Add("Cversion", "v2");
+            client.DefaultRequestHeaders.Add("Language", "vn");
+            client.DefaultRequestHeaders.Add("Source", "pc");
+            client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "empty");
+            client.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "cors");
+            client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "same-site");
+        })
         .AddStandardResilienceHandler();
 
     builder.Services.AddSingleton<LdShopDiscountService>();
+
+    // Lootbar
+    builder.Services.AddHttpClient(nameof(LootbarDiscountService))
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip |
+                                     System.Net.DecompressionMethods.Deflate
+        })
+        .ConfigureHttpClient(client =>
+        {
+            client.DefaultRequestHeaders.Add("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
+            client.DefaultRequestHeaders.Add("Accept", "application/json, text/plain, */*");
+            client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+            client.DefaultRequestHeaders.Add("Origin", "https://www.lootbar.com");
+            client.DefaultRequestHeaders.Add("Referer", "https://www.lootbar.com/");
+            client.DefaultRequestHeaders.Add("x-currency", "VND");
+            client.DefaultRequestHeaders.Add("x-ps-app-version-code", "v20260615");
+            client.DefaultRequestHeaders.Add("x-ps-locale", "en");
+            client.DefaultRequestHeaders.Add("x-ps-os-type", "Android");
+            client.DefaultRequestHeaders.Add("x-ps-system-type", "mobile_web");
+            client.DefaultRequestHeaders.Add("sec-fetch-dest", "empty");
+            client.DefaultRequestHeaders.Add("sec-fetch-mode", "cors");
+            client.DefaultRequestHeaders.Add("sec-fetch-site", "same-site");
+        })
+        .AddStandardResilienceHandler();
+
+    builder.Services.AddSingleton<LootbarDiscountService>();
+
+    // ── Shop Providers ───────────────────────────────────────────────────
+    // Thứ tự đăng ký = thứ tự hiển thị khi cùng discount.
+    // Để add shop mới: AddSingleton<IShopDiscountProvider, NewProvider>()
+    builder.Services.AddSingleton<IShopDiscountProvider, LdShopDiscountProvider>();
+    builder.Services.AddSingleton<IShopDiscountProvider, LootbarDiscountProvider>();
+
+    builder.Services.AddSingleton<ShopDiscountAggregator>();
 
     builder.Services.AddSingleton<IYouTubeApiService, YouTubeApiService>();
 

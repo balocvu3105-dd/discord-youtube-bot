@@ -11,7 +11,6 @@ namespace YouTubeDiscordBot.Background;
 public class ShopBackgroundService : BackgroundService
 {
     private readonly IDiscordService _discord;
-    private readonly DiscordService _discordImpl;
     private readonly BotConfiguration _config;
     private readonly IShopService _shopService;
     private readonly IShopMessagePersistenceService _persistence;
@@ -30,14 +29,12 @@ public class ShopBackgroundService : BackgroundService
 
     public ShopBackgroundService(
         IDiscordService discord,
-        DiscordService discordImpl,
         IOptions<BotConfiguration> config,
         IShopService shopService,
         IShopMessagePersistenceService persistence,
         ILogger<ShopBackgroundService> logger)
     {
         _discord = discord;
-        _discordImpl = discordImpl;
         _config = config.Value;
         _shopService = shopService;
         _persistence = persistence;
@@ -49,7 +46,7 @@ public class ShopBackgroundService : BackgroundService
         _logger.LogInformation(
             "ShopBackgroundService starting — refresh lúc 00:00 và 12:00 (giờ VN)");
 
-        await _discordImpl.WaitForReadyAsync();
+        await _discord.WaitForReadyAsync();
         _logger.LogInformation("Discord ready — ShopBackgroundService running");
 
         while (!stoppingToken.IsCancellationRequested)
