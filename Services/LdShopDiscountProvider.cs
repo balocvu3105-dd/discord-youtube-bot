@@ -24,10 +24,13 @@ public class LdShopDiscountProvider : IShopDiscountProvider
     {
         if (game.CommodityId <= 0) return null;
 
-        // Ưu tiên API, fallback về config
+        // Ưu tiên config (cập nhật thủ công từ website — chính xác nhất).
+        // API LDShop trả về max SKU discount, không khớp với giá hiển thị trên trang.
+        if (game.DiscountPercent > 0) return game.DiscountPercent;
+
+        // Fallback: dùng API khi config chưa set (DiscountPercent = 0)
         var apiPct = _service.GetDiscount(game.CommodityId);
-        if (apiPct.HasValue) return apiPct.Value;
-        return game.DiscountPercent > 0 ? game.DiscountPercent : null;
+        return apiPct.HasValue ? apiPct.Value : null;
     }
 
     public string? GetAffiliateLink(ShopGameConfig game)
