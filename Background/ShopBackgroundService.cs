@@ -111,15 +111,19 @@ public class ShopBackgroundService : BackgroundService
 
         // ── Section LDShop ────────────────────────────────────────────────
         var (ldEmbed, ldComponents) = await _shopService.BuildLdShopEmbedAsync();
-        changed |= await UpsertMessageAsync(channel, ldEmbed, ldComponents,
-            ref state.LdShopMessageId, "LDShop", ct);
+        var (ldChanged, ldId) = await UpsertMessageAsync(channel, ldEmbed, ldComponents,
+            state.LdShopMessageId, "LDShop", ct);
+        state.LdShopMessageId = ldId;
+        changed |= ldChanged;
 
         await Task.Delay(1000, ct);
 
         // ── Section Lootbar ───────────────────────────────────────────────
         var (lbEmbed, lbComponents) = await _shopService.BuildLootbarEmbedAsync();
-        changed |= await UpsertMessageAsync(channel, lbEmbed, lbComponents,
-            ref state.LootbarMessageId, "Lootbar", ct);
+        var (lbChanged, lbId) = await UpsertMessageAsync(channel, lbEmbed, lbComponents,
+            state.LootbarMessageId, "Lootbar", ct);
+        state.LootbarMessageId = lbId;
+        changed |= lbChanged;
 
         if (changed)
             await _persistence.SaveAsync(state);
@@ -129,18 +133,18 @@ public class ShopBackgroundService : BackgroundService
 
     // ── Helper: edit nếu message tồn tại, tạo mới nếu bị xóa ───────────────
 
-    private async Task<bool> UpsertMessageAsync(
+    private async Task<(bool changed, ulong messageId)> UpsertMessageAsync(
         IMessageChannel channel,
         Embed embed,
         MessageComponent components,
-        ref ulong messageId,
+        ulong currentId,
         string label,
         CancellationToken ct)
     {
         IUserMessage? existing = null;
-        if (messageId != 0)
+        if (currentId != 0)
         {
-            try { existing = await channel.GetMessageAsync(messageId) as IUserMessage; }
+            try { existing = await channel.GetMessageAsync(currentId) as IUserMessage; }
             catch { /* message bị xóa */ }
         }
 
@@ -148,12 +152,11 @@ public class ShopBackgroundService : BackgroundService
         {
             await existing.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
             _logger.LogInformation("[{Label}] embed updated — {MessageId}", label, existing.Id);
-            return false;
+            return (false, existing.Id);
         }
 
         var msg = await channel.SendMessageAsync(embed: embed, components: components);
-        messageId = msg.Id;
         _logger.LogInformation("[{Label}] embed created — {MessageId}", label, msg.Id);
-        return true;
+        return (true, msg.Id);
     }
 }

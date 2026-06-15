@@ -3,6 +3,7 @@ using Discord.Interactions;
 using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using YouTubeDiscordBot.Background;
 using YouTubeDiscordBot.Config;
 using YouTubeDiscordBot.Models;
 using YouTubeDiscordBot.Services;
