@@ -68,6 +68,13 @@ public class ShopGameConfig
 
 	/// <summary>Fallback % giảm giá Lootbar khi API không trả được.</summary>
 	public int LootbarFallbackDiscount { get; set; }
+
+	/// <summary>
+	/// app_service_id của game này trong Lootbar API.
+	/// Xem logs "Lootbar cached: app_service_id=X" để xác định giá trị đúng.
+	/// WuWa=226, Genshin=5, HSR=77, ZZZ=90, NTE=89, AKE=301
+	/// </summary>
+	public int LootbarAppServiceId { get; set; }
 }
 
 public class ShopMessageState

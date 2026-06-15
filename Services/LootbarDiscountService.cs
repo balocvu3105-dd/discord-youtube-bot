@@ -11,16 +11,17 @@ namespace YouTubeDiscordBot.Services;
 ///   ?service_type=recharge&page_num=1&page_size=50&incoming=1
 ///   &shop_code={shopCode}&utm_source=Affiliate&utm_medium=shop&utm_campaign={shopCode}
 ///
-/// Lần đầu chạy, log "save_rate raw" sẽ hiển thị cấu trúc JSON thực tế.
-/// Nếu field names khác với dưới đây, cập nhật ParseItem().
+/// Response format thực tế:
+///   {"data":{"items":[{"app_service_id":226,"appid":20170,"save_price_rate":12}, ...]},"status":"ok"}
+/// Cache key = app_service_id (int). Map trong appsettings.json qua LootbarAppServiceId.
 /// </summary>
 public class LootbarDiscountService
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<LootbarDiscountService> _logger;
 
-    // cache: LootbarGameSeo → discount%
-    private readonly ConcurrentDictionary<string, int> _cache = new(StringComparer.OrdinalIgnoreCase);
+    // cache: app_service_id → discount%
+    private readonly ConcurrentDictionary<int, int> _cache = new();
 
     private const string SaveRateUrlTemplate =
         "https://api.lootbar.com/api/v2/market/shop/game_app_service/save_rate" +
@@ -52,8 +53,6 @@ public class LootbarDiscountService
             }
 
             var body = await response.Content.ReadAsStringAsync();
-
-            // Log toàn bộ response lần đầu để xác nhận field names
             _logger.LogInformation("Lootbar save_rate raw (shopCode={Code}): {Body}",
                 shopCode, body.Length > 2000 ? body[..2000] : body);
 
@@ -65,8 +64,9 @@ public class LootbarDiscountService
         }
     }
 
-    public int? GetDiscount(string gameSeo)
-        => _cache.TryGetValue(gameSeo, out var v) ? v : null;
+    /// <summary>Lấy discount theo app_service_id (xem LootbarAppServiceId trong appsettings.json).</summary>
+    public int? GetDiscount(int appServiceId)
+        => _cache.TryGetValue(appServiceId, out var v) ? v : null;
 
     // ── Parser ───────────────────────────────────────────────────────────
 
@@ -77,24 +77,29 @@ public class LootbarDiscountService
             using var doc = JsonDocument.Parse(body);
             var root = doc.RootElement;
 
-            // Tìm array items — thử các key thông dụng
             if (!TryGetList(root, out var list))
             {
-                _logger.LogWarning("Lootbar save_rate: không tìm thấy list trong response. Xem log 'raw' ở trên để kiểm tra cấu trúc JSON.");
+                _logger.LogWarning("Lootbar save_rate: không tìm thấy items array trong response.");
                 return;
             }
 
             var count = 0;
             foreach (var item in list.EnumerateArray())
             {
-                var (seo, pct) = ParseItem(item);
-                if (seo is null || pct <= 0) continue;
-                _cache[seo] = pct;
-                _logger.LogInformation("Lootbar cached: {Seo} → {Pct}%", seo, pct);
+                if (!item.TryGetProperty("app_service_id", out var idEl) ||
+                    !idEl.TryGetInt32(out var appServiceId)) continue;
+
+                var pct = 0;
+                if (item.TryGetProperty("save_price_rate", out var rateEl) &&
+                    rateEl.TryGetInt32(out var rate))
+                    pct = rate;
+
+                _cache[appServiceId] = pct;
+                _logger.LogInformation("Lootbar cached: app_service_id={Id} → {Pct}%", appServiceId, pct);
                 count++;
             }
 
-            _logger.LogInformation("Lootbar WarmCache done — {Count} games cached", count);
+            _logger.LogInformation("Lootbar WarmCache done — {Count} services cached", count);
         }
         catch (Exception ex)
         {
@@ -102,82 +107,22 @@ public class LootbarDiscountService
         }
     }
 
-    /// <summary>
-    /// Thử các cấu trúc response phổ biến của Lootbar.
-    /// Nếu sai, xem log "save_rate raw" và cập nhật hàm này.
-    /// </summary>
     private static bool TryGetList(JsonElement root, out JsonElement list)
     {
-        // {"data": {"list": [...]}}
+        // {"data": {"items": [...]}}  ← format thực tế của Lootbar
         if (root.TryGetProperty("data", out var data))
         {
+            if (data.TryGetProperty("items", out list) && list.ValueKind == JsonValueKind.Array)
+                return true;
             if (data.TryGetProperty("list", out list) && list.ValueKind == JsonValueKind.Array)
                 return true;
-            // {"data": {"records": [...]}}
             if (data.TryGetProperty("records", out list) && list.ValueKind == JsonValueKind.Array)
                 return true;
-            // {"data": [...]}
             if (data.ValueKind == JsonValueKind.Array) { list = data; return true; }
         }
-        // {"list": [...]}
         if (root.TryGetProperty("list", out list) && list.ValueKind == JsonValueKind.Array)
             return true;
         list = default;
         return false;
-    }
-
-    /// <summary>
-    /// Parse một item trong array → (gameSeo, discountPercent).
-    /// TODO: Cập nhật field names dựa theo log "save_rate raw" lần đầu chạy.
-    /// Các field name thường gặp: game_seo / gameSeo / seo_name / slug
-    ///                             save_rate / saveRate / discount / discount_rate / rate
-    /// </summary>
-    private (string? seo, int pct) ParseItem(JsonElement item)
-    {
-        // ── Game identifier ────────────────────────────────────────
-        string? seo = null;
-        foreach (var key in new[] { "game_seo", "gameSeo", "seo_name", "slug", "game_slug" })
-        {
-            if (item.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
-            {
-                seo = v.GetString();
-                if (!string.IsNullOrEmpty(seo)) break;
-            }
-        }
-
-        // ── Discount percent ───────────────────────────────────────
-        var pct = 0;
-        // Thử string field: "15%" hoặc "15"
-        foreach (var key in new[] { "save_rate", "saveRate", "discount_rate", "discount", "rate", "save_rate_str" })
-        {
-            if (item.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
-            {
-                pct = ParsePercent(v.GetString());
-                if (pct > 0) break;
-            }
-        }
-        // Thử int/number field
-        if (pct == 0)
-        {
-            foreach (var key in new[] { "save_rate_num", "saveRateNum", "discount_num", "discountNum", "save_rate" })
-            {
-                if (item.TryGetProperty(key, out var v) &&
-                    (v.ValueKind == JsonValueKind.Number) &&
-                    v.TryGetInt32(out var n) && n > 0)
-                {
-                    pct = n;
-                    break;
-                }
-            }
-        }
-
-        return (seo, pct);
-    }
-
-    private static int ParsePercent(string? value)
-    {
-        if (string.IsNullOrEmpty(value)) return 0;
-        var clean = value.TrimEnd('%', ' ');
-        return int.TryParse(clean, out var n) ? Math.Abs(n) : 0;
     }
 }

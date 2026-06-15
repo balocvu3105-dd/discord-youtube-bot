@@ -25,8 +25,11 @@ public class LootbarDiscountProvider : IShopDiscountProvider
     {
         if (string.IsNullOrWhiteSpace(game.LootbarGameSeo)) return null;
 
-        var apiPct = _service.GetDiscount(game.LootbarGameSeo);
-        if (apiPct.HasValue) return apiPct.Value;
+        if (game.LootbarAppServiceId > 0)
+        {
+            var apiPct = _service.GetDiscount(game.LootbarAppServiceId);
+            if (apiPct.HasValue) return apiPct.Value;
+        }
 
         return game.LootbarFallbackDiscount > 0 ? game.LootbarFallbackDiscount : null;
     }
