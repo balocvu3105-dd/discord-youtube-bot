@@ -5,7 +5,9 @@
 [![Docker](https://img.shields.io/badge/Docker-Enabled-2496ED?logo=docker)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-A production-grade Discord bot built with **.NET 8** and **C#**, deployed on a Linux VPS via Docker. It handles YouTube channel monitoring and a real-time game shop discount board with multi-provider aggregation, affiliate link tracking, and scheduled embed refresh.
+A production-grade Discord bot built with **.NET 8** and **C#**, deployed on a Linux VPS via Docker. It handles YouTube channel monitoring and an extensible multi-provider game shop discount board with affiliate link tracking and scheduled embed refresh.
+
+The shop system is designed around a **provider pattern** — currently integrating **LDShop** and **Lootbar**, with the architecture ready to onboard additional shops (Codashop, Midasbuy, Garena, etc.) by adding a single class.
 
 > **Live in production** — serving an active Discord community for a game top-up affiliate shop.
 
@@ -18,9 +20,10 @@ A production-grade Discord bot built with **.NET 8** and **C#**, deployed on a L
 - Sends rich Discord embeds to dedicated channels with full deduplication
 - Restart-safe: survives container restarts without re-sending notifications via persistent JSON state
 
-### Game Shop Discount Board
-- Aggregates real-time discount data from **two independent providers**: LDShop and Lootbar
-- Renders two separate Discord embeds (one per provider) with live discount percentages and affiliate buttons
+### Multi-Provider Game Shop Discount Board
+- Aggregates real-time discount data from multiple independent shop providers (currently **LDShop** and **Lootbar**)
+- Each provider renders its own Discord embed with live discount percentages and affiliate buttons
+- Extensible by design: adding a new shop (Codashop, Midasbuy, Garena, etc.) requires only implementing `IShopDiscountProvider` — no changes to existing code
 - Scheduled auto-refresh at 00:00 and 12:00 (Vietnam time, UTC+7) via a `BackgroundService`
 - `/refreshshop` slash command (Admin only) for on-demand refresh — edits existing messages in-place, never creates duplicates
 - Persists Discord message IDs to `ShopMessageState` so embeds survive bot restarts
@@ -76,7 +79,7 @@ A production-grade Discord bot built with **.NET 8** and **C#**, deployed on a L
 
 ## Design Patterns
 
-**Provider / Strategy** — `IShopDiscountProvider` defines a uniform interface; `LdShopDiscountProvider` and `LootbarDiscountProvider` are independent implementations composed by `ShopDiscountAggregator`. Adding a new shop requires only a new class — zero changes to existing code (Open/Closed Principle).
+**Provider / Strategy** — `IShopDiscountProvider` defines a uniform interface; `LdShopDiscountProvider` and `LootbarDiscountProvider` are two current implementations composed by `ShopDiscountAggregator`. Adding a new shop (Codashop, Midasbuy, Garena, etc.) requires only a new class registered with DI — zero changes to existing code (Open/Closed Principle). The aggregator runs all providers in parallel via `Task.WhenAll`.
 
 **IHttpClientFactory** — each external API gets its own named `HttpClient` with provider-specific headers, compression (`GZip`/`Deflate`), and Polly standard resilience (retry with exponential backoff + circuit breaker).
 
