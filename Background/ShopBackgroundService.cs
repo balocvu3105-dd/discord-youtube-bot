@@ -85,7 +85,6 @@ public class ShopBackgroundService : BackgroundService
         var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, VnTimeZone);
         var todayTime = now.TimeOfDay;
 
-        // Tìm thời điểm gần nhất trong tương lai
         var next = RefreshTimes
             .Select(t => t > todayTime ? t : t.Add(TimeSpan.FromHours(24)))
             .Min();
@@ -93,9 +92,9 @@ public class ShopBackgroundService : BackgroundService
         return next - todayTime;
     }
 
-    // ── Refresh All Shop Messages ────────────────────────────────────────────
+    // ── Refresh toàn bộ shop ─────────────────────────────────────────────────
 
-    private async Task RefreshShopAsync(CancellationToken ct)
+    public async Task RefreshShopAsync(CancellationToken ct = default)
     {
         _logger.LogInformation("Refreshing shop messages...");
 
@@ -108,79 +107,53 @@ public class ShopBackgroundService : BackgroundService
         await _shopService.WarmDiscountCacheAsync();
 
         var state = await _persistence.LoadAsync();
-        var stateChanged = false;
+        var changed = false;
 
-        var overviewChanged = await RefreshOverviewAsync(channel, state);
-        stateChanged |= overviewChanged;
+        // ── Section LDShop ────────────────────────────────────────────────
+        var (ldEmbed, ldComponents) = await _shopService.BuildLdShopEmbedAsync();
+        changed |= await UpsertMessageAsync(channel, ldEmbed, ldComponents,
+            ref state.LdShopMessageId, "LDShop", ct);
 
-        await Task.Delay(1500, ct);
+        await Task.Delay(1000, ct);
 
-        foreach (var game in _config.ShopGames)
-        {
-            var gameChanged = await RefreshGameEmbedAsync(channel, game, state);
-            stateChanged |= gameChanged;
-            await Task.Delay(2500, ct);
-        }
+        // ── Section Lootbar ───────────────────────────────────────────────
+        var (lbEmbed, lbComponents) = await _shopService.BuildLootbarEmbedAsync();
+        changed |= await UpsertMessageAsync(channel, lbEmbed, lbComponents,
+            ref state.LootbarMessageId, "Lootbar", ct);
 
-        if (stateChanged)
+        if (changed)
             await _persistence.SaveAsync(state);
 
         _logger.LogInformation("Shop refresh completed");
     }
 
-    // ── Overview Message ─────────────────────────────────────────────────────
+    // ── Helper: edit nếu message tồn tại, tạo mới nếu bị xóa ───────────────
 
-    private async Task<bool> RefreshOverviewAsync(IMessageChannel channel, ShopMessageState state)
+    private async Task<bool> UpsertMessageAsync(
+        IMessageChannel channel,
+        Embed embed,
+        MessageComponent components,
+        ref ulong messageId,
+        string label,
+        CancellationToken ct)
     {
-        var (embed, components) = await _shopService.BuildOverviewAsync();
-
         IUserMessage? existing = null;
-        if (state.PinnedMessageId != 0)
+        if (messageId != 0)
         {
-            try { existing = await channel.GetMessageAsync(state.PinnedMessageId) as IUserMessage; }
+            try { existing = await channel.GetMessageAsync(messageId) as IUserMessage; }
             catch { /* message bị xóa */ }
         }
 
-        if (existing is null)
+        if (existing is not null)
         {
-            var msg = await channel.SendMessageAsync(embed: embed, components: components);
-            state.PinnedMessageId = msg.Id;
-            _logger.LogInformation("Overview message created — {MessageId}", msg.Id);
-            return true;
+            await existing.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
+            _logger.LogInformation("[{Label}] embed updated — {MessageId}", label, existing.Id);
+            return false;
         }
 
-        await existing.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
-        _logger.LogInformation("Overview message updated — {MessageId}", existing.Id);
-        return false;
-    }
-
-    // ── Game Embed ───────────────────────────────────────────────────────────
-
-    private async Task<bool> RefreshGameEmbedAsync(
-        IMessageChannel channel, ShopGameConfig game, ShopMessageState state)
-    {
-        var result = await _shopService.BuildGameEmbedAsync(game);
-        if (result is null) return false;
-
-        var (embed, components) = result.Value;
-
-        IUserMessage? existing = null;
-        if (state.GameMessageIds.TryGetValue(game.Name, out var existingId))
-        {
-            try { existing = await channel.GetMessageAsync(existingId) as IUserMessage; }
-            catch { /* message bị xóa */ }
-        }
-
-        if (existing is null)
-        {
-            var msg = await channel.SendMessageAsync(embed: embed, components: components);
-            state.GameMessageIds[game.Name] = msg.Id;
-            _logger.LogInformation("[{Game}] embed created — {MessageId}", game.Name, msg.Id);
-            return true;
-        }
-
-        await existing.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
-        _logger.LogInformation("[{Game}] embed updated — {MessageId}", game.Name, existing.Id);
-        return false;
+        var msg = await channel.SendMessageAsync(embed: embed, components: components);
+        messageId = msg.Id;
+        _logger.LogInformation("[{Label}] embed created — {MessageId}", label, msg.Id);
+        return true;
     }
 }

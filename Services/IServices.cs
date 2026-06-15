@@ -36,8 +36,12 @@ public interface IYouTubeApiService
 public interface IShopService
 {
     Task WarmDiscountCacheAsync();
-    Task<(Discord.Embed embed, Discord.MessageComponent components)> BuildOverviewAsync();
-    Task<(Discord.Embed embed, Discord.MessageComponent components)?> BuildGameEmbedAsync(ShopGameConfig game);
+
+    /// <summary>Build embed section LDShop — hiển thị tất cả game + buttons.</summary>
+    Task<(Discord.Embed embed, Discord.MessageComponent components)> BuildLdShopEmbedAsync();
+
+    /// <summary>Build embed section Lootbar — hiển thị tất cả game + buttons.</summary>
+    Task<(Discord.Embed embed, Discord.MessageComponent components)> BuildLootbarEmbedAsync();
 }
 
 public interface IShopMessagePersistenceService

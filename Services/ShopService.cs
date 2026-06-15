@@ -25,144 +25,114 @@ public class ShopService : IShopService
     public async Task WarmDiscountCacheAsync()
         => await _aggregator.WarmAllAsync(_config.ShopGames);
 
-    // ── Overview ─────────────────────────────────────────────────────────
+    // ── LDShop Section ───────────────────────────────────────────────────
 
-    public Task<(Embed embed, MessageComponent components)> BuildOverviewAsync()
+    public Task<(Embed embed, MessageComponent components)> BuildLdShopEmbedAsync()
     {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("💎 **Tiết kiệm khi nạp game qua nhiều sàn!**");
-        sb.AppendLine();
-        sb.AppendLine("⚠️ **QUAN TRỌNG — ĐỂ GHI NHẬN HỖ TRỢ SERVER**");
-        sb.AppendLine("• Đăng nhập tài khoản trước khi bấm link nạp");
-        sb.AppendLine("• Không dùng tab ẩn danh khi thanh toán");
-        sb.AppendLine();
-        sb.AppendLine("🎮 Chọn game bên dưới để xem so sánh giá chi tiết");
+        var desc = new System.Text.StringBuilder();
+        desc.AppendLine("⚠️ **ĐỂ GHI NHẬN HỖ TRỢ SERVER:**");
+        desc.AppendLine("• Đăng nhập tài khoản LDShop trước khi bấm link");
+        desc.AppendLine("• Không dùng tab ẩn danh khi thanh toán");
 
         var embed = new EmbedBuilder()
-            .WithTitle("🛒 So Sánh Giá Nạp Game")
-            .WithColor(new Color(255, 165, 0))
-            .WithDescription(sb.ToString())
+            .WithTitle("🛒 LDShop — Nạp Game Giá Rẻ")
+            .WithColor(new Color(255, 140, 0))
+            .WithDescription(desc.ToString())
             .WithFooter("🔄 Cập nhật lúc 00:00 & 12:00 (giờ VN)")
             .WithCurrentTimestamp();
 
-        foreach (var game in _config.ShopGames)
-        {
-            var discounts = _aggregator.GetDiscounts(game);
-            string fieldValue;
-
-            if (discounts.Count == 0)
-            {
-                fieldValue = "🔥 Ưu đãi";
-            }
-            else if (discounts.Count == 1)
-            {
-                var d = discounts[0];
-                fieldValue = d.Percent > 0 ? $"🔥 -{d.Percent}% ({d.ProviderName})" : "🔥 Ưu đãi";
-            }
-            else
-            {
-                // Hiển thị bên tốt nhất + số bên còn lại
-                var best = discounts[0];
-                fieldValue = $"🏆 -{best.Percent}% ({best.ProviderName})\n" +
-                             string.Join(" | ", discounts.Skip(1).Select(d => $"-{d.Percent}% {d.ProviderName}"));
-            }
-
-            embed.AddField($"{game.Emoji} {game.Name}", fieldValue, inline: true);
-        }
-
-        // Buttons: link đến game đầu tiên có affiliate (tối đa 5 button/row)
         var buttons = new ComponentBuilder();
+        var btnCount = 0;
+
         foreach (var game in _config.ShopGames)
         {
+            if (string.IsNullOrWhiteSpace(game.AffiliateLink)) continue;
+
             var discounts = _aggregator.GetDiscounts(game);
-            if (discounts.Count == 0) continue;
-            buttons.WithButton(
-                label: $"{game.Emoji} {game.Name}",
-                style: ButtonStyle.Link,
-                url: discounts[0].AffiliateLink); // link của bên rẻ nhất
+            var ldShop = discounts.FirstOrDefault(d => d.ProviderName == "LDShop");
+
+            // Field giá trị
+            var fieldLines = new System.Text.StringBuilder();
+            if (ldShop is not null && ldShop.Percent > 0)
+                fieldLines.Append($"🔥 **-{ldShop.Percent}%**");
+            else
+                fieldLines.Append("🔥 Ưu đãi");
+
+            if (!string.IsNullOrWhiteSpace(game.TopUpType))
+                fieldLines.Append($"\n⚡ {game.TopUpType}");
+
+            if (!string.IsNullOrWhiteSpace(game.Warning))
+                fieldLines.Append($"\n{game.Warning}");
+
+            embed.AddField($"{game.Emoji} {game.Name}", fieldLines.ToString(), inline: true);
+
+            // Button (Discord giới hạn 25 button / 5 hàng)
+            if (btnCount < 25)
+            {
+                var label = ldShop is not null && ldShop.Percent > 0
+                    ? $"{game.Emoji} {game.Name} (-{ldShop.Percent}%)"
+                    : $"{game.Emoji} {game.Name}";
+                buttons.WithButton(label: label, style: ButtonStyle.Link, url: game.AffiliateLink);
+                btnCount++;
+            }
         }
 
         return Task.FromResult((embed.Build(), buttons.Build()));
     }
 
-    // ── Game Embed ───────────────────────────────────────────────────────
+    // ── Lootbar Section ──────────────────────────────────────────────────
 
-    public Task<(Embed embed, MessageComponent components)?> BuildGameEmbedAsync(ShopGameConfig game)
+    public Task<(Embed embed, MessageComponent components)> BuildLootbarEmbedAsync()
     {
-        var discounts = _aggregator.GetDiscounts(game);
+        var shopLink = _config.LootbarShopLink;
+        if (string.IsNullOrWhiteSpace(shopLink))
+            shopLink = "https://www.lootbar.com";
 
-        if (discounts.Count == 0)
-        {
-            _logger.LogWarning("[{Game}] không có provider nào có discount — bỏ qua embed", game.Name);
-            return Task.FromResult<(Embed, MessageComponent)?>(null);
-        }
+        var desc = new System.Text.StringBuilder();
+        desc.AppendLine("⚠️ **ĐỂ GHI NHẬN HỖ TRỢ SERVER:**");
+        desc.AppendLine("• Đăng nhập tài khoản Lootbar trước khi bấm link");
+        desc.AppendLine("• Không dùng tab ẩn danh khi thanh toán");
 
-        var sb = new System.Text.StringBuilder();
+        var embed = new EmbedBuilder()
+            .WithTitle("🏪 Lootbar — Cửa Hàng CataWuwa")
+            .WithColor(new Color(88, 101, 242))  // màu tím/xanh riêng để phân biệt với LDShop
+            .WithDescription(desc.ToString())
+            .WithFooter("🔄 Cập nhật lúc 00:00 & 12:00 (giờ VN)")
+            .WithCurrentTimestamp();
 
-        // PromoNote
-        if (!string.IsNullOrWhiteSpace(game.PromoNote))
-        {
-            sb.AppendLine($"💬 {game.PromoNote}");
-            sb.AppendLine();
-        }
+        var buttons = new ComponentBuilder();
+        var btnCount = 0;
 
-        // So sánh giá
-        if (discounts.Count == 1)
+        foreach (var game in _config.ShopGames)
         {
-            var d = discounts[0];
-            if (d.Percent > 0)
-                sb.AppendLine($"🔥 Giảm **{d.Percent}%** qua {d.ProviderName}");
-        }
-        else
-        {
-            sb.AppendLine("📊 **So sánh giá:**");
-            for (var i = 0; i < discounts.Count; i++)
+            if (string.IsNullOrWhiteSpace(game.LootbarGameSeo)) continue;
+
+            var discounts = _aggregator.GetDiscounts(game);
+            var lootbar = discounts.FirstOrDefault(d => d.ProviderName == "Lootbar");
+
+            if (lootbar is null)
             {
-                var d = discounts[i];
-                var medal = i == 0 ? "🏆" : "  ";
-                var pctStr = d.Percent > 0 ? $"-**{d.Percent}%**" : "Ưu đãi";
-                sb.AppendLine($"{medal} {d.ProviderName}: {pctStr}");
+                // Lootbar không có data cho game này → bỏ qua field
+                _logger.LogDebug("[Lootbar section] {Game} — không có data, bỏ qua", game.Name);
+                continue;
+            }
+
+            var fieldValue = lootbar.Percent > 0
+                ? $"🔥 **-{lootbar.Percent}%**"
+                : "🔥 Ưu đãi";
+
+            embed.AddField($"{game.Emoji} {game.Name}", fieldValue, inline: true);
+
+            if (btnCount < 25)
+            {
+                var label = lootbar.Percent > 0
+                    ? $"{game.Emoji} {game.Name} (-{lootbar.Percent}%)"
+                    : $"{game.Emoji} {game.Name}";
+                buttons.WithButton(label: label, style: ButtonStyle.Link, url: lootbar.AffiliateLink);
+                btnCount++;
             }
         }
 
-        // TopUpType
-        if (!string.IsNullOrWhiteSpace(game.TopUpType))
-        {
-            sb.AppendLine();
-            sb.AppendLine($"⚡ {game.TopUpType}");
-        }
-
-        // Warning
-        if (!string.IsNullOrWhiteSpace(game.Warning))
-        {
-            sb.AppendLine();
-            sb.AppendLine(game.Warning);
-        }
-
-        // Tiêu đề embed: hiển thị discount tốt nhất
-        var best = discounts[0];
-        var titleDiscount = best.Percent > 0 ? $" — Giảm {best.Percent}%!" : string.Empty;
-
-        var embed = new EmbedBuilder()
-            .WithTitle($"{game.Emoji} {game.Name}{titleDiscount}")
-            .WithDescription(sb.ToString())
-            .WithColor(new Color(255, 140, 0))
-            .WithFooter(discounts.Count > 1
-                ? $"So sánh từ {discounts.Count} sàn • {string.Join(" vs ", discounts.Select(d => d.ProviderName))}"
-                : $"{best.ProviderName} x {game.Name}")
-            .WithCurrentTimestamp()
-            .Build();
-
-        // Buttons: 1 button per provider (tối đa 5)
-        var buttons = new ComponentBuilder();
-        foreach (var d in discounts.Take(5))
-        {
-            var label = d.Percent > 0
-                ? $"🛒 {d.ProviderName} (-{d.Percent}%)"
-                : $"🛒 Nạp qua {d.ProviderName}";
-            buttons.WithButton(label: label, style: ButtonStyle.Link, url: d.AffiliateLink);
-        }
-
-        return Task.FromResult<(Embed, MessageComponent)?>((embed, buttons.Build()));
+        return Task.FromResult((embed.Build(), buttons.Build()));
     }
 }

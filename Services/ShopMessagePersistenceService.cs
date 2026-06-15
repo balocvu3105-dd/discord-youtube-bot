@@ -29,8 +29,8 @@ public class ShopMessagePersistenceService
     {
         var state = await ReadAsync();
         _logger.LogInformation(
-            "ShopMessageState loaded — PinnedId={Id} GameCount={Count}",
-            state.PinnedMessageId, state.GameMessageIds.Count);
+            "ShopMessageState loaded — LdShop={LdId} Lootbar={LbId}",
+            state.LdShopMessageId, state.LootbarMessageId);
         return state;
     }
 
@@ -38,7 +38,7 @@ public class ShopMessagePersistenceService
     {
         await WriteAsync(state);
         _logger.LogInformation(
-            "ShopMessageState saved — PinnedId={Id} GameCount={Count}",
-            state.PinnedMessageId, state.GameMessageIds.Count);
+            "ShopMessageState saved — LdShop={LdId} Lootbar={LbId}",
+            state.LdShopMessageId, state.LootbarMessageId);
     }
 }

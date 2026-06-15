@@ -15,6 +15,7 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
     private readonly IShopMessagePersistenceService _persistence;
     private readonly IDiscordService _discord;
     private readonly BotConfiguration _config;
+    private readonly ShopBackgroundService _shopBackground;
     private readonly ILogger<ShopCommandModule> _logger;
 
     public ShopCommandModule(
@@ -22,16 +23,18 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
         IShopMessagePersistenceService persistence,
         IDiscordService discord,
         IOptions<BotConfiguration> config,
+        ShopBackgroundService shopBackground,
         ILogger<ShopCommandModule> logger)
     {
         _shopService = shopService;
         _persistence = persistence;
         _discord = discord;
         _config = config.Value;
+        _shopBackground = shopBackground;
         _logger = logger;
     }
 
-    [SlashCommand("refreshshop", "Tạo lại toàn bộ shop embed ngay lập tức")]
+    [SlashCommand("refreshshop", "Cập nhật lại shop embed (chỉ edit, không tạo message mới)")]
     [DefaultMemberPermissions(GuildPermission.Administrator)]
     public async Task RefreshShopAsync()
     {
@@ -39,42 +42,17 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
 
         try
         {
-            if (_discord.Client.GetChannel(_config.ShopChannelId) is not IMessageChannel channel)
+            if (_discord.Client.GetChannel(_config.ShopChannelId) is not IMessageChannel)
             {
                 await FollowupAsync("❌ Không tìm thấy shop channel!", ephemeral: true);
                 return;
             }
 
-            await _shopService.WarmDiscountCacheAsync();
+            // Dùng RefreshShopAsync từ BackgroundService để đảm bảo logic nhất quán.
+            // ShopBackgroundService là singleton nên có thể inject trực tiếp.
+            await _shopBackground.RefreshShopAsync();
 
-            // Reset state để force tạo toàn bộ message mới
-            var state = new ShopMessageState();
-
-            // Overview
-            var (embed, components) = await _shopService.BuildOverviewAsync();
-            var msg = await channel.SendMessageAsync(embed: embed, components: components);
-            state.PinnedMessageId = msg.Id;
-            _logger.LogInformation("[/refreshshop] Overview created — {MessageId}", msg.Id);
-
-            // Game embeds — tạo lại tất cả
-            foreach (var game in _config.ShopGames)
-            {
-                var result = await _shopService.BuildGameEmbedAsync(game);
-                if (result is null) continue;
-
-                var (gameEmbed, gameComponents) = result.Value;
-                var gameMsg = await channel.SendMessageAsync(embed: gameEmbed, components: gameComponents);
-                state.GameMessageIds[game.Name] = gameMsg.Id;
-                _logger.LogInformation("[/refreshshop] [{Game}] embed created — {MessageId}", game.Name, gameMsg.Id);
-
-                await Task.Delay(500); // tránh rate limit Discord
-            }
-
-            await _persistence.SaveAsync(state);
-
-            await FollowupAsync(
-                $"✅ Shop đã được tạo lại thành công! ({_config.ShopGames.Count} game embeds)",
-                ephemeral: true);
+            await FollowupAsync("✅ Shop đã được cập nhật!", ephemeral: true);
         }
         catch (Exception ex)
         {

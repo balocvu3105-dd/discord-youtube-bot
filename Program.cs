@@ -146,7 +146,9 @@ try
 
     // ── Background Services ──────────────────────────────────────────────
     builder.Services.AddHostedService<YouTubeCheckerBackgroundService>();
-    builder.Services.AddHostedService<ShopBackgroundService>();
+    // AddSingleton trước để có thể inject ShopBackgroundService vào ShopCommandModule
+    builder.Services.AddSingleton<ShopBackgroundService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ShopBackgroundService>());
 
     // ── Command Modules ──────────────────────────────────────────────────
     builder.Services.AddTransient<ShopCommandModule>();
