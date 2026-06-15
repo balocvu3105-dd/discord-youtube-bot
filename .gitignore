@@ -22,10 +22,11 @@ Thumbs.db
 
 # Secrets & config
 .env
+appsettings.json
 appsettings.Development.json
 
 # Runtime state
-data/
+data/*.json
 logs/
 *.log
 
