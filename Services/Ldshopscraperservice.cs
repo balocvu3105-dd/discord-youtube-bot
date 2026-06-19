@@ -6,13 +6,14 @@ namespace YouTubeDiscordBot.Services;
 
 /// <summary>
 /// Gọi API công khai của LDShop để lấy % giảm giá thực tế.
-/// Hiện tại chưa được tích hợp vào bot (future feature).
-/// Không cần đăng nhập — chỉ cần header "Channel: ldshop".
+/// Chưa được tích hợp vào bot (future feature) — không đăng ký trong DI.
 /// </summary>
 public class LdShopScraperService
 {
-    private readonly HttpClient _http;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<LdShopScraperService> _logger;
+
+    private const string HttpClientName = nameof(LdShopDiscountService);
 
     private const string AllCommodityUrl =
         "https://api.ldshop.gg/api/commodity/allCommodity";
@@ -21,31 +22,39 @@ public class LdShopScraperService
     private const string PageUrlTemplate =
         "https://api.ldshop.gg/api/commodity/page?commoditySeo={0}&language=vn&currency=VND&pageNum=1&pageSize=1";
 
-    public LdShopScraperService(HttpClient http, ILogger<LdShopScraperService> logger)
-    {
-        _http = http;
-        _logger = logger;
+    // Thread-safe lazy cache: chỉ fetch allCommodity 1 lần, dù nhiều coroutine gọi đồng thời.
+    // SemaphoreSlim bảo vệ phần populate.
+    private readonly SemaphoreSlim _nameCacheLock = new(1, 1);
+    private Dictionary<string, string>? _nameCache;
 
-        if (!_http.DefaultRequestHeaders.Contains("Channel"))
-            _http.DefaultRequestHeaders.Add("Channel", "ldshop");
+    public LdShopScraperService(
+        IHttpClientFactory httpClientFactory,
+        ILogger<LdShopScraperService> logger)
+    {
+        _httpClientFactory = httpClientFactory;
+        _logger = logger;
     }
 
-    public async Task<List<LdShopPromo>> FetchPromosAsync(IEnumerable<string> commoditySeoList)
+    public async Task<List<LdShopPromo>> FetchPromosAsync(
+        IEnumerable<string> commoditySeoList,
+        CancellationToken ct = default)
     {
         var result = new List<LdShopPromo>();
 
         foreach (var seo in commoditySeoList)
         {
+            if (ct.IsCancellationRequested) break;
             try
             {
-                var promo = await FetchOnePromoAsync(seo);
-                if (promo != null)
+                var promo = await FetchOnePromoAsync(seo, ct);
+                if (promo is not null)
                 {
                     result.Add(promo);
                     _logger.LogInformation("{Seo} → {Discount}%", seo, promo.DiscountPercent);
                 }
-                await Task.Delay(500);
+                await Task.Delay(500, ct);
             }
+            catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to fetch promo for {Seo}", seo);
@@ -55,13 +64,15 @@ public class LdShopScraperService
         return result;
     }
 
-    private async Task<LdShopPromo?> FetchOnePromoAsync(string commoditySeo)
-    {
-        var skuId = await GetFirstSkuIdAsync(commoditySeo);
-        if (skuId == null) return null;
+    // ── Private helpers ──────────────────────────────────────────────────────
 
-        var discount = await GetDiscountPercentAsync(skuId.Value);
-        var name = await GetGameNameAsync(commoditySeo);
+    private async Task<LdShopPromo?> FetchOnePromoAsync(string commoditySeo, CancellationToken ct)
+    {
+        var skuId = await GetFirstSkuIdAsync(commoditySeo, ct);
+        if (skuId is null) return null;
+
+        var discount = await GetDiscountPercentAsync(skuId.Value, ct);
+        var name = await GetGameNameAsync(commoditySeo, ct);
 
         return new LdShopPromo
         {
@@ -72,11 +83,11 @@ public class LdShopScraperService
         };
     }
 
-    private async Task<int?> GetFirstSkuIdAsync(string commoditySeo)
+    private async Task<int?> GetFirstSkuIdAsync(string commoditySeo, CancellationToken ct)
     {
         var url = string.Format(PageUrlTemplate, commoditySeo);
-        var json = await GetJsonAsync(url);
-        if (json == null) return null;
+        var json = await GetJsonAsync(url, ct);
+        if (json is null) return null;
 
         try
         {
@@ -92,11 +103,11 @@ public class LdShopScraperService
         }
     }
 
-    private async Task<int> GetDiscountPercentAsync(int skuId)
+    private async Task<int> GetDiscountPercentAsync(int skuId, CancellationToken ct)
     {
         var url = string.Format(PriceUrlTemplate, skuId);
-        var json = await GetJsonAsync(url);
-        if (json == null) return 0;
+        var json = await GetJsonAsync(url, ct);
+        if (json is null) return 0;
 
         try
         {
@@ -114,15 +125,28 @@ public class LdShopScraperService
         }
     }
 
-    private Dictionary<string, string>? _nameCache;
-
-    private async Task<string?> GetGameNameAsync(string commoditySeo)
+    /// <summary>
+    /// Lazy load tên game — thread-safe qua SemaphoreSlim.
+    /// Nếu nhiều coroutine cùng gọi lần đầu, chỉ 1 coroutine fetch HTTP,
+    /// các coroutine còn lại chờ và dùng kết quả đã cache.
+    /// </summary>
+    private async Task<string?> GetGameNameAsync(string commoditySeo, CancellationToken ct)
     {
-        if (_nameCache == null)
+        // Fast path: cache đã có, không cần lock
+        if (_nameCache is not null)
+            return _nameCache.TryGetValue(commoditySeo, out var cached) ? cached : null;
+
+        await _nameCacheLock.WaitAsync(ct);
+        try
         {
-            _nameCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var json = await GetJsonAsync(AllCommodityUrl);
-            if (json != null)
+            // Double-check sau khi vào lock
+            if (_nameCache is not null)
+                return _nameCache.TryGetValue(commoditySeo, out var cached) ? cached : null;
+
+            var newCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var json = await GetJsonAsync(AllCommodityUrl, ct);
+
+            if (json is not null)
             {
                 try
                 {
@@ -131,27 +155,40 @@ public class LdShopScraperService
                     {
                         var seo = item.GetProperty("commoditySeo").GetString() ?? "";
                         var name = item.GetProperty("commodityName").GetString() ?? seo;
-                        if (!string.IsNullOrEmpty(seo)) _nameCache[seo] = name;
+                        if (!string.IsNullOrEmpty(seo))
+                            newCache[seo] = name;
                     }
                 }
-                catch (Exception ex) { _logger.LogWarning(ex, "Parse allCommodity failed"); }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Parse allCommodity failed");
+                }
             }
+
+            // Assign cuối cùng — volatile write qua assignment đủ để fast-path đọc đúng
+            _nameCache = newCache;
+            return _nameCache.TryGetValue(commoditySeo, out var result) ? result : null;
         }
-        return _nameCache.TryGetValue(commoditySeo, out var n) ? n : null;
+        finally
+        {
+            _nameCacheLock.Release();
+        }
     }
 
-    private async Task<string?> GetJsonAsync(string url)
+    private async Task<string?> GetJsonAsync(string url, CancellationToken ct)
     {
         try
         {
-            var response = await _http.GetAsync(url);
+            using var client = _httpClientFactory.CreateClient(HttpClientName);
+            var response = await client.GetAsync(url, ct);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("HTTP {Status} from {Url}", (int)response.StatusCode, url);
                 return null;
             }
-            return await response.Content.ReadAsStringAsync();
+            return await response.Content.ReadAsStringAsync(ct);
         }
+        catch (OperationCanceledException) { return null; }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "GET failed: {Url}", url);
