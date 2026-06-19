@@ -99,13 +99,18 @@ Background/
   YouTubeCheckerBackgroundService.cs # Polls YouTube API for new videos and live events
 
 Commands/
-  ShopCommandModule.cs               # /refreshshop slash command
+  ShopCommandModule.cs               # /refreshshop slash command (Admin only, cooldown 60s)
 
 Config/
   BotConfiguration.cs                # Strongly-typed configuration model
 
 Models/
-  Models.cs                          # ShopGameConfig, ShopMessageState, etc.
+  BotState.cs                        # Last video ID + last checked timestamp
+  VideoInfo.cs                       # Video metadata + IsLive flag
+  ShopGameConfig.cs                  # Per-game config (LDShop + Lootbar fields)
+  ShopMessageState.cs                # Persisted Discord message IDs per provider
+  LdShopPromo.cs                     # LDShop promo result (Equals/GetHashCode by name+discount)
+  Models.cs                          # (legacy stub — content moved to files above)
 
 Services/
   IServices.cs                       # Service & provider interfaces
@@ -113,12 +118,12 @@ Services/
   ShopService.cs                     # Builds Discord embeds for LDShop & Lootbar
   ShopDiscountAggregator.cs          # Composes IShopDiscountProvider list, runs in parallel
   LdShopDiscountProvider.cs
-  LdShopDiscountService.cs           # LDShop HTTP API client
+  LdShopDiscountService.cs           # LDShop HTTP API client (parallel WarmCache, CancellationToken)
   LootbarDiscountProvider.cs
   LootbarDiscountService.cs          # Lootbar HTTP API client (app_service_id mapping)
-  LootbarScraperService.cs           # Lootbar HTML scraper fallback
+  LdShopScraperService.cs            # LDShop scraper (thread-safe _nameCache via SemaphoreSlim)
   ShopMessagePersistenceService.cs   # Persists Discord message IDs to JSON
-  DiscordService.cs                  # Discord client connection & event wiring
+  DiscordService.cs                  # Discord client, events, startup notification
   YouTubeApiService.cs               # YouTube Data API v3 wrapper
   LiveStateService.cs                # Tracks current live stream state
   PersistenceService.cs              # Last-video-state persistence
@@ -126,7 +131,8 @@ Services/
 
 Program.cs                           # DI composition root
 Dockerfile
-appsettings.json
+appsettings.json                     # ⚠️ GITIGNORED — chứa token/key, tạo thủ công trên VPS
+appsettings.example.json             # Template đầy đủ để tham khảo
 ```
 
 ---
@@ -154,18 +160,26 @@ BotConfiguration__YoutubeApiKey=YOUR_YOUTUBE_API_KEY
 
 ### Configuration
 
-All other settings live in `appsettings.json`:
+`appsettings.json` bị **gitignore** (chứa token/key nhạy cảm). Tạo file này thủ công trên VPS hoặc local dựa theo `appsettings.example.json`.
 
 ```json
 {
+  "Logging": {
+    "LogLevel": { "Default": "Information" },
+    "Console": {
+      "FormatterName": "simple",
+      "FormatterOptions": { "TimestampFormat": "[HH:mm:ss] " }
+    }
+  },
   "BotConfiguration": {
-    "DiscordToken": "",
-    "YoutubeApiKey": "",
-    "YoutubeChannelId": "UCxxxxxxxxxxxxxxx",
+    "DiscordToken":   "YOUR_DISCORD_BOT_TOKEN",
+    "YoutubeApiKey":  "YOUR_YOUTUBE_API_KEY",
+    "YoutubeChannelId": "UCxxxxxxxxxxxxxxxxxxxxxxxx",
 
-    "LiveChannelId":  1234567890123456789,
-    "VideoChannelId": 1234567890123456789,
-    "ShopChannelId":  1234567890123456789,
+    "LiveChannelId":   1234567890123456789,
+    "VideoChannelId":  1234567890123456789,
+    "ShopChannelId":   1234567890123456789,
+    "StatusChannelId": 0,
 
     "LiveRoleId":  1234567890123456789,
     "VideoRoleId": 1234567890123456789,
@@ -175,7 +189,7 @@ All other settings live in `appsettings.json`:
     "StateFilePath":     "data/last_video_state.json",
     "LiveStateFilePath": "data/live_state.json",
 
-    "ShopNotice": "Optional announcement text shown above the shop embeds",
+    "ShopNotice": "",
 
     "LootbarShopCode": "YourShopCode",
     "LootbarShopLink": "https://www.lootbar.com/shop/YourShopCode",
@@ -186,33 +200,59 @@ All other settings live in `appsettings.json`:
         "Emoji":        "🌊",
         "CommodityId":  10016,
         "SkuLabelId":   74,
-        "AffiliateLink": "https://chain.ldshop.gg/...",
+        "AffiliateLink": "https://chain.ldshop.gg/YOUR_LINK",
         "DiscountPercent": 10,
         "PromoNote":    "Tiết kiệm ngay khi nạp Lunite!",
         "TopUpType":    "LDShop đăng nhập hộ",
         "Warning":      "⚠️ Không đăng nhập game trong lúc đang xử lý",
-        "LootbarGameSeo":       "wuthering-waves",
-        "LootbarAffiliateLink": "https://www.lootbar.com/top-up/wuthering-waves?shop_code=YourCode",
+        "LootbarGameSeo":          "wuthering-waves",
+        "LootbarAffiliateLink":    "https://www.lootbar.com/top-up/wuthering-waves?shop_code=YourCode",
         "LootbarFallbackDiscount": 0,
-        "LootbarAppServiceId":  89
+        "LootbarAppServiceId":     89
       }
     ]
   }
 }
 ```
 
-| Field | Description |
-|---|---|
-| `YoutubeChannelId` | The YouTube channel ID to monitor (`UC...`) |
-| `LiveChannelId` / `VideoChannelId` | Discord channel IDs for live/video notifications |
-| `ShopChannelId` | Discord channel ID where shop embeds are posted |
-| `LiveRoleId` / `VideoRoleId` | Role IDs to ping on new livestream / video |
-| `CheckIntervalSeconds` | How often to poll YouTube API (default: 120s) |
-| `ShopNotice` | Optional text pinned above shop embeds (e.g. promotions) |
-| `LootbarShopCode` | Your Lootbar shop referral code |
-| `CommodityId` / `SkuLabelId` | LDShop internal IDs for the game's discount lookup |
-| `LootbarAppServiceId` | Lootbar's `app_service_id` for the game |
-| `LootbarFallbackDiscount` | Fallback discount % if Lootbar API returns no data |
+#### Bảng field bắt buộc / tuỳ chọn
+
+| Field | Bắt buộc | Mô tả |
+|---|:---:|---|
+| `DiscordToken` | ✅ | Bot token từ Discord Developer Portal |
+| `YoutubeApiKey` | ✅ | YouTube Data API v3 key |
+| `YoutubeChannelId` | ✅ | ID kênh YouTube cần monitor (`UC...`) |
+| `LiveChannelId` | ✅ | Channel Discord nhận thông báo livestream |
+| `VideoChannelId` | ✅ | Channel Discord nhận thông báo video mới |
+| `ShopChannelId` | ✅ | Channel Discord để đăng shop embed |
+| `StatusChannelId` | ⬜ | Channel nhận thông báo bot khởi động/restart. `0` = tắt |
+| `LiveRoleId` | ⬜ | Role ping khi livestream bắt đầu. `0` = không ping |
+| `VideoRoleId` | ⬜ | Role ping khi có video mới. `0` = không ping |
+| `CheckIntervalSeconds` | ⬜ | Tần suất poll YouTube API (giây, mặc định `120`) |
+| `ShopNotice` | ⬜ | Dòng thông báo phụ hiển thị trên shop embed. `""` = ẩn |
+| `LootbarShopCode` | ✅* | Mã shop affiliate Lootbar (ví dụ: `CataWuwa`) |
+| `LootbarShopLink` | ✅* | Link trang shop Lootbar chính |
+| `ShopGames[].Name` | ✅ | Tên game hiển thị trên embed |
+| `ShopGames[].Emoji` | ⬜ | Emoji đầu tên game |
+| `ShopGames[].CommodityId` | ✅ | ID game trên LDShop (dùng để fetch % giảm giá realtime) |
+| `ShopGames[].SkuLabelId` | ✅ | SKU label ID trên LDShop |
+| `ShopGames[].AffiliateLink` | ✅ | Link affiliate LDShop cho game này |
+| `ShopGames[].DiscountPercent` | ⬜ | % giảm giá fallback nếu API LDShop không trả về (mặc định `0`) |
+| `ShopGames[].PromoNote` | ⬜ | Ghi chú promo hiển thị dưới tên game |
+| `ShopGames[].TopUpType` | ⬜ | Loại nạp (ví dụ: "Nạp UID", "đăng nhập hộ") |
+| `ShopGames[].Warning` | ⬜ | Cảnh báo hiển thị trên embed (ví dụ: đổi mật khẩu sau khi nạp) |
+| `ShopGames[].LootbarGameSeo` | ✅* | SEO slug của game trên Lootbar (ví dụ: `wuthering-waves`) |
+| `ShopGames[].LootbarAffiliateLink` | ✅* | Link affiliate Lootbar cho game này |
+| `ShopGames[].LootbarFallbackDiscount` | ⬜ | % fallback nếu Lootbar API không trả về (mặc định `0`) |
+| `ShopGames[].LootbarAppServiceId` | ✅* | `app_service_id` của game trên Lootbar (dùng để fetch % realtime) |
+
+> ✅* = Bắt buộc nếu dùng Lootbar integration.
+
+> ⚠️ **Lưu ý VPS**: sau khi thay đổi `appsettings.json` trực tiếp trên VPS, cần rebuild image để thay đổi có hiệu lực:
+> ```bash
+> cd /root/bot/discord-youtube-bot
+> docker compose up --build -d
+> ```
 
 ### Docker Compose (Production)
 
