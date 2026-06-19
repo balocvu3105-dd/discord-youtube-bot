@@ -17,7 +17,7 @@ public class LdShopDiscountProvider : IShopDiscountProvider
         var pairs = games
             .Where(g => g.CommodityId > 0 && g.SkuLabelId > 0)
             .Select(g => (g.CommodityId, g.SkuLabelId));
-        await _service.WarmCacheAsync(pairs);
+        await _service.WarmCacheAsync(pairs, ct);
     }
 
     public int? GetDiscount(ShopGameConfig game)

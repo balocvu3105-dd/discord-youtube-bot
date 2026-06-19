@@ -2,6 +2,7 @@ using Discord;
 using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Reflection;
 using YouTubeDiscordBot.Config;
 using YouTubeDiscordBot.Models;
 
@@ -123,14 +124,46 @@ public class DiscordService : IDiscordService
 
     // ── Event Handlers ───────────────────────────────────────────────────────
 
-    private Task OnReadyAsync()
+    private async Task OnReadyAsync()
     {
         _readyTcs.TrySetResult(true);
         _logger.LogInformation(
             "Discord Ready — logged in as {Username}#{Discriminator}",
             _client.CurrentUser.Username,
             _client.CurrentUser.Discriminator);
-        return Task.CompletedTask;
+
+        await SendStartupNotificationAsync();
+    }
+
+    /// <summary>
+    /// Gửi embed thông báo khi bot khởi động / restart.
+    /// Chỉ gửi nếu StatusChannelId != 0.
+    /// </summary>
+    private async Task SendStartupNotificationAsync()
+    {
+        if (_config.StatusChannelId == 0) return;
+
+        try
+        {
+            var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?";
+            var embed = new EmbedBuilder()
+                .WithTitle("🤖 Bot đã khởi động")
+                .WithDescription(
+                    $"**{_client.CurrentUser.Username}** đã kết nối thành công và sẵn sàng hoạt động.")
+                .WithColor(Color.Green)
+                .AddField("Phiên bản", $"`v{version}`", inline: true)
+                .AddField("Thời gian", $"<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:F>", inline: true)
+                .WithCurrentTimestamp()
+                .Build();
+
+            await SendToChannelAsync(_config.StatusChannelId, embed: embed);
+            _logger.LogInformation(
+                "Startup notification sent → StatusChannel {ChannelId}", _config.StatusChannelId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SendStartupNotificationAsync thất bại");
+        }
     }
 
     private Task OnDisconnectedAsync(Exception? ex)

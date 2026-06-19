@@ -11,9 +11,8 @@ namespace YouTubeDiscordBot.Services;
 ///   ?service_type=recharge&page_num=1&page_size=50&incoming=1
 ///   &shop_code={shopCode}&utm_source=Affiliate&utm_medium=shop&utm_campaign={shopCode}
 ///
-/// Response format thực tế:
-///   {"data":{"items":[{"app_service_id":226,"appid":20170,"save_price_rate":12}, ...]},"status":"ok"}
-/// Cache key = app_service_id (int). Map trong appsettings.json qua LootbarAppServiceId.
+/// Response format: {"data":{"items":[{"app_service_id":226,"appid":20170,"save_price_rate":12},...]},"status":"ok"}
+/// Cache key = app_service_id. Map qua LootbarAppServiceId trong appsettings.json.
 /// </summary>
 public class LootbarDiscountService
 {
@@ -28,17 +27,19 @@ public class LootbarDiscountService
         "?service_type=recharge&page_num=1&page_size=50&incoming=1" +
         "&shop_code={0}&utm_source=Affiliate&utm_medium=shop&utm_campaign={0}";
 
-    public LootbarDiscountService(IHttpClientFactory httpClientFactory, ILogger<LootbarDiscountService> logger)
+    public LootbarDiscountService(
+        IHttpClientFactory httpClientFactory,
+        ILogger<LootbarDiscountService> logger)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
-    public async Task WarmCacheAsync(string shopCode)
+    public async Task WarmCacheAsync(string shopCode, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(shopCode))
         {
-            _logger.LogWarning("LootbarDiscountService.WarmCacheAsync: shopCode is empty — skipping");
+            _logger.LogWarning("LootbarDiscountService.WarmCacheAsync: shopCode trống — bỏ qua");
             return;
         }
 
@@ -47,20 +48,26 @@ public class LootbarDiscountService
         try
         {
             using var client = _httpClientFactory.CreateClient(nameof(LootbarDiscountService));
-            var response = await client.GetAsync(url);
+            var response = await client.GetAsync(url, ct);
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Lootbar save_rate HTTP {Status} — {Url}",
-                    (int)response.StatusCode, url);
+                _logger.LogWarning("Lootbar save_rate HTTP {Status} — shopCode={Code}",
+                    (int)response.StatusCode, shopCode);
                 return;
             }
 
-            var body = await response.Content.ReadAsStringAsync();
-            _logger.LogInformation("Lootbar save_rate raw (shopCode={Code}): {Body}",
-                shopCode, body.Length > 2000 ? body[..2000] : body);
+            var body = await response.Content.ReadAsStringAsync(ct);
+
+            // Debug only — tránh dump raw API data vào production logs
+            _logger.LogDebug("Lootbar save_rate raw (shopCode={Code}): {Preview}",
+                shopCode, body.Length > 500 ? body[..500] : body);
 
             ParseAndCache(body);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("LootbarDiscountService.WarmCacheAsync cancelled");
         }
         catch (Exception ex)
         {
@@ -68,11 +75,11 @@ public class LootbarDiscountService
         }
     }
 
-    /// <summary>Lấy discount theo app_service_id (xem LootbarAppServiceId trong appsettings.json).</summary>
+    /// <summary>Lấy discount theo app_service_id.</summary>
     public int? GetDiscount(int appServiceId)
         => _cache.TryGetValue(appServiceId, out var v) ? v : null;
 
-    // ── Parser ───────────────────────────────────────────────────────────
+    // ── Parser ───────────────────────────────────────────────────────────────
 
     private void ParseAndCache(string body)
     {
@@ -99,7 +106,7 @@ public class LootbarDiscountService
                     pct = rate;
 
                 _cache[appServiceId] = pct;
-                _logger.LogInformation("Lootbar cached: app_service_id={Id} → {Pct}%", appServiceId, pct);
+                _logger.LogDebug("Lootbar cached: app_service_id={Id} → {Pct}%", appServiceId, pct);
                 count++;
             }
 
@@ -113,7 +120,6 @@ public class LootbarDiscountService
 
     private static bool TryGetList(JsonElement root, out JsonElement list)
     {
-        // {"data": {"items": [...]}}  ← format thực tế của Lootbar
         if (root.TryGetProperty("data", out var data))
         {
             if (data.TryGetProperty("items", out list) && list.ValueKind == JsonValueKind.Array)
@@ -126,6 +132,7 @@ public class LootbarDiscountService
         }
         if (root.TryGetProperty("list", out list) && list.ValueKind == JsonValueKind.Array)
             return true;
+
         list = default;
         return false;
     }

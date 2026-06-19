@@ -1,34 +1,34 @@
 using Discord;
 using Discord.Interactions;
-using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using YouTubeDiscordBot.Background;
 using YouTubeDiscordBot.Config;
-using YouTubeDiscordBot.Models;
 using YouTubeDiscordBot.Services;
 
 namespace YouTubeDiscordBot.Commands;
 
+[RequireContext(ContextType.Guild)]
 public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
 {
-    private readonly IShopService _shopService;
-    private readonly IShopMessagePersistenceService _persistence;
     private readonly IDiscordService _discord;
     private readonly BotConfiguration _config;
     private readonly ShopBackgroundService _shopBackground;
     private readonly ILogger<ShopCommandModule> _logger;
 
+    // ── Cooldown ─────────────────────────────────────────────────────────────
+    // static + lock: cooldown toàn cục, thread-safe.
+    // ShopCommandModule là Transient nên không dùng instance field.
+    private static readonly object _refreshLock = new();
+    private static DateTime _lastRefreshUtc = DateTime.MinValue;
+    private static readonly TimeSpan RefreshCooldown = TimeSpan.FromSeconds(60);
+
     public ShopCommandModule(
-        IShopService shopService,
-        IShopMessagePersistenceService persistence,
         IDiscordService discord,
         IOptions<BotConfiguration> config,
         ShopBackgroundService shopBackground,
         ILogger<ShopCommandModule> logger)
     {
-        _shopService = shopService;
-        _persistence = persistence;
         _discord = discord;
         _config = config.Value;
         _shopBackground = shopBackground;
@@ -41,24 +41,51 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
     {
         await DeferAsync(ephemeral: true);
 
+        // ── Rate limit (thread-safe) ──────────────────────────────────────────
+        var cooldownMessage = GetCooldownMessage();
+        if (cooldownMessage is not null)
+        {
+            await FollowupAsync(cooldownMessage, ephemeral: true);
+            return;
+        }
+
+        // ── Channel guard ─────────────────────────────────────────────────────
+        if (_discord.Client.GetChannel(_config.ShopChannelId) is not IMessageChannel)
+        {
+            await FollowupAsync("❌ Không tìm thấy shop channel!", ephemeral: true);
+            return;
+        }
+
         try
         {
-            if (_discord.Client.GetChannel(_config.ShopChannelId) is not IMessageChannel)
-            {
-                await FollowupAsync("❌ Không tìm thấy shop channel!", ephemeral: true);
-                return;
-            }
+            lock (_refreshLock) { _lastRefreshUtc = DateTime.UtcNow; }
 
-            // Dùng RefreshShopAsync từ BackgroundService để đảm bảo logic nhất quán.
-            // ShopBackgroundService là singleton nên có thể inject trực tiếp.
             await _shopBackground.RefreshShopAsync();
-
             await FollowupAsync("✅ Shop đã được cập nhật!", ephemeral: true);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[/refreshshop] thất bại");
-            await FollowupAsync($"❌ Lỗi: {ex.Message}", ephemeral: true);
+            // Reset cooldown khi lỗi để admin thử lại ngay.
+            // KHÔNG forward ex.Message — tránh leak thông tin nội bộ ra Discord.
+            lock (_refreshLock) { _lastRefreshUtc = DateTime.MinValue; }
+            _logger.LogError(ex, "[/refreshshop] thất bại — userId={UserId}", Context.User.Id);
+            await FollowupAsync(
+                "❌ Đã xảy ra lỗi khi cập nhật shop. Vui lòng thử lại sau.",
+                ephemeral: true);
+        }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// <returns>Thông báo cooldown nếu còn hiệu lực, null nếu được phép chạy.</returns>
+    private static string? GetCooldownMessage()
+    {
+        lock (_refreshLock)
+        {
+            var elapsed = DateTime.UtcNow - _lastRefreshUtc;
+            if (elapsed >= RefreshCooldown) return null;
+            var remaining = (int)(RefreshCooldown - elapsed).TotalSeconds + 1;
+            return $"⏳ Vui lòng chờ thêm **{remaining}s** trước khi refresh lại.";
         }
     }
 }

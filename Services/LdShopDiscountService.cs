@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
@@ -8,10 +8,6 @@ namespace YouTubeDiscordBot.Services;
 
 public class LdShopDiscountService
 {
-    // Lưu factory thay vì HttpClient instance.
-    // Mỗi lần FetchDiscountAsync được gọi sẽ tạo HttpClient mới từ factory,
-    // đảm bảo HttpMessageHandler được rotate đúng chu kỳ (2 phút mặc định)
-    // → tránh DNS staleness khi bot chạy liên tục nhiều ngày.
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<LdShopDiscountService> _logger;
 
@@ -21,23 +17,10 @@ public class LdShopDiscountService
 
     private static readonly string[] ExcludedSkuKeywords =
     [
-        "New User Exclusive",
-        "Bundle",
-        "Guarantee",
-        "Collection",
-        "Outfit",
-        "Subscription",
-        "Upgrade",
-        "Chassis",
-        "Ring",
-        "Aid",
-        "Protocol",
-        "Lightpack",
-        "Heavypack",
-        "Voyage",
-        "Prep",
-        "Insider Channel",
-        "Connoisseur Channel",
+        "New User Exclusive", "Bundle", "Guarantee", "Collection",
+        "Outfit", "Subscription", "Upgrade", "Chassis", "Ring",
+        "Aid", "Protocol", "Lightpack", "Heavypack", "Voyage",
+        "Prep", "Insider Channel", "Connoisseur Channel",
     ];
 
     public LdShopDiscountService(
@@ -48,22 +31,36 @@ public class LdShopDiscountService
         _logger = logger;
     }
 
-    public async Task WarmCacheAsync(IEnumerable<(int commodityId, int skuLabelId)> games)
+    // ── Cache warm ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Fetch discount cho tất cả game song song.
+    /// Dùng Task.WhenAll thay vì foreach tuần tự — giảm thời gian warm
+    /// từ N×RTT xuống còn max(RTT) khi có N game.
+    /// </summary>
+    public async Task WarmCacheAsync(
+        IEnumerable<(int commodityId, int skuLabelId)> games,
+        CancellationToken ct = default)
     {
-        foreach (var (commodityId, skuLabelId) in games)
+        var tasks = games.Select(async g =>
         {
-            var pct = await FetchDiscountAsync(commodityId, skuLabelId);
-            // Chỉ cache khi pct > 0 — nếu API trả về 0 (no discount found)
-            // thì KHÔNG cache, để ResolveDiscount fallback về DiscountPercent trong appsettings.
-            if (pct.HasValue && pct.Value > 0)
-                _cache[commodityId] = (int)Math.Round(pct.Value);
-        }
+            var pct = await FetchDiscountAsync(g.commodityId, g.skuLabelId, ct);
+            if (pct is > 0)
+                _cache[g.commodityId] = (int)Math.Round(pct.Value);
+        });
+
+        await Task.WhenAll(tasks);
     }
 
     public int? GetDiscount(int commodityId)
         => _cache.TryGetValue(commodityId, out var v) ? v : null;
 
-    public async Task<double?> FetchDiscountAsync(int commodityId, int skuLabelId)
+    // ── API fetch ────────────────────────────────────────────────────────────
+
+    public async Task<double?> FetchDiscountAsync(
+        int commodityId,
+        int skuLabelId,
+        CancellationToken ct = default)
     {
         try
         {
@@ -74,44 +71,44 @@ public class LdShopDiscountService
                 skuLabelId
             };
 
-            var json = JsonSerializer.Serialize(payload);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var content = new StringContent(
+                JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
-            // Tạo client mới mỗi request — factory quản lý handler pool,
-            // HttpClient instance được dispose sau khi dùng xong.
             using var httpClient = _httpClientFactory.CreateClient(nameof(LdShopDiscountService));
-            var response = await httpClient.PostAsync(SkuPageUrl, content);
+            var response = await httpClient.PostAsync(SkuPageUrl, content, ct);
 
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("HTTP {Status} from sku/page (commodityId={Id}) — body: {Body}",
-                    (int)response.StatusCode, commodityId, errorBody);
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning(
+                    "HTTP {Status} from sku/page (commodityId={Id}) — {Body}",
+                    (int)response.StatusCode, commodityId,
+                    errorBody.Length > 200 ? errorBody[..200] : errorBody);
                 return null;
             }
 
-            var body = await response.Content.ReadAsStringAsync();
+            var body = await response.Content.ReadAsStringAsync(ct);
 
-            // Log 300 ký tự đầu để debug structure thực tế
-            _logger.LogInformation("sku/page preview (commodityId={Id}): {Preview}",
+            // Chỉ log ở Debug — tránh dump API data vào production logs
+            _logger.LogDebug("sku/page raw (commodityId={Id}): {Preview}",
                 commodityId, body.Length > 300 ? body[..300] : body);
 
             var result = JsonSerializer.Deserialize<SkuPageResponse>(body);
 
-            if (result?.Data is null || result.Data.Count == 0)
+            if (result?.Data is not { Count: > 0 })
             {
                 _logger.LogWarning("Empty data — commodityId={Id}", commodityId);
                 return null;
             }
 
-            _logger.LogInformation("Total SKUs before filter (commodityId={Id}): {Count}",
-                commodityId, result.Data.Count);
-
-            foreach (var sku in result.Data.Take(5))
+            // Debug: log vài SKU mẫu để dễ debug khi cần
+            foreach (var sku in result.Data.Take(3))
             {
-                _logger.LogInformation(
-                    "  SKU sample — name={Name}, discount={Discount}, stockStatus={Stock}, excluded={Excl}",
-                    sku.SkuName, sku.Discount, sku.StockStatus, IsExcludedSku(sku.SkuName));
+                _logger.LogDebug(
+                    "  SKU sample (commodityId={Id}) — name={Name}, discount={Discount}, " +
+                    "stockStatus={Stock}, excluded={Excl}",
+                    commodityId, sku.SkuName, sku.Discount, sku.StockStatus,
+                    IsExcludedSku(sku.SkuName));
             }
 
             var discounts = result.Data
@@ -125,13 +122,19 @@ public class LdShopDiscountService
 
             if (discounts.Count == 0)
             {
-                _logger.LogInformation("No discount found after filter — commodityId={Id}", commodityId);
+                _logger.LogInformation("No discount after filter — commodityId={Id}", commodityId);
                 return 0;
             }
 
             var maxDiscount = discounts.Max();
-            _logger.LogInformation("Discount fetched — commodityId={Id}, max={Pct}%", commodityId, maxDiscount);
+            _logger.LogInformation("Discount fetched — commodityId={Id}, max={Pct}%",
+                commodityId, maxDiscount);
             return maxDiscount;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("FetchDiscountAsync cancelled — commodityId={Id}", commodityId);
+            return null;
         }
         catch (Exception ex)
         {
@@ -139,6 +142,8 @@ public class LdShopDiscountService
             return null;
         }
     }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
     private static bool IsExcludedSku(string? skuName)
     {
@@ -150,21 +155,20 @@ public class LdShopDiscountService
     private static int ParseDiscountPercent(string? discount)
     {
         if (string.IsNullOrEmpty(discount) || discount == "None") return 0;
-        // Format API trả về: "28%OFF" → lấy số trước %
         var idx = discount.IndexOf('%');
         if (idx <= 0) return 0;
         return int.TryParse(discount[..idx], out var pct) ? pct : 0;
     }
 
-    // REVERT: data là array trực tiếp, không phải object có records
-    // Confirmed từ curl: {"code":200,"msg":"success","data":[{...}]}
-    private class SkuPageResponse
+    // ── Response DTOs (private — không expose ra ngoài) ──────────────────────
+
+    private sealed class SkuPageResponse
     {
         [JsonPropertyName("data")]
         public List<SkuItem>? Data { get; set; }
     }
 
-    private class SkuItem
+    private sealed class SkuItem
     {
         [JsonPropertyName("discount")]
         public string? Discount { get; set; }

@@ -25,6 +25,12 @@ public class BotConfiguration
     [Range(1, ulong.MaxValue, ErrorMessage = "ShopChannelId phải là ID hợp lệ")]
     public ulong ShopChannelId { get; set; }
 
+    /// <summary>
+    /// Channel để gửi thông báo khi bot khởi động / restart.
+    /// Để 0 = tắt tính năng thông báo restart.
+    /// </summary>
+    public ulong StatusChannelId { get; set; }
+
     // ── Roles ────────────────────────────────────────────────────────────
     public ulong LiveRoleId { get; set; }
     public ulong VideoRoleId { get; set; }

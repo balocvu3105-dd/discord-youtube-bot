@@ -23,7 +23,6 @@ public class ShopBackgroundService : BackgroundService
         TimeSpan.FromHours(12), // 12:00
     ];
 
-    // UTC offset Việt Nam
     private static readonly TimeZoneInfo VnTimeZone =
         TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
 
@@ -52,11 +51,11 @@ public class ShopBackgroundService : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             var delay = GetDelayUntilNextRefresh();
-            var next = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow + delay, VnTimeZone);
+            var nextVn = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow + delay, VnTimeZone);
 
             _logger.LogInformation(
                 "Shop refresh tiếp theo lúc {Next:HH:mm dd/MM/yyyy} (giờ VN) — chờ {Delay:hh\\:mm}",
-                next, delay);
+                nextVn, delay);
 
             try
             {
@@ -78,21 +77,7 @@ public class ShopBackgroundService : BackgroundService
         }
     }
 
-    // ── Tính thời gian chờ đến 00:00 hoặc 12:00 tiếp theo ──────────────────
-
-    private static TimeSpan GetDelayUntilNextRefresh()
-    {
-        var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, VnTimeZone);
-        var todayTime = now.TimeOfDay;
-
-        var next = RefreshTimes
-            .Select(t => t > todayTime ? t : t.Add(TimeSpan.FromHours(24)))
-            .Min();
-
-        return next - todayTime;
-    }
-
-    // ── Refresh toàn bộ shop ─────────────────────────────────────────────────
+    // ── Public: dùng được từ ShopCommandModule ───────────────────────────────
 
     public async Task RefreshShopAsync(CancellationToken ct = default)
     {
@@ -109,19 +94,20 @@ public class ShopBackgroundService : BackgroundService
         var state = await _persistence.LoadAsync();
         var changed = false;
 
-        // ── Section LDShop ────────────────────────────────────────────────
+        // ── Section LDShop ────────────────────────────────────────────────────
         var (ldEmbed, ldComponents) = await _shopService.BuildLdShopEmbedAsync();
-        var (ldChanged, ldId) = await UpsertMessageAsync(channel, ldEmbed, ldComponents,
-            state.LdShopMessageId, "LDShop", ct);
+        var (ldChanged, ldId) = await UpsertMessageAsync(
+            channel, ldEmbed, ldComponents, state.LdShopMessageId, "LDShop", ct);
         state.LdShopMessageId = ldId;
         changed |= ldChanged;
 
+        // Delay nhỏ giữa 2 message để tránh rate limit Discord
         await Task.Delay(1000, ct);
 
-        // ── Section Lootbar ───────────────────────────────────────────────
+        // ── Section Lootbar ───────────────────────────────────────────────────
         var (lbEmbed, lbComponents) = await _shopService.BuildLootbarEmbedAsync();
-        var (lbChanged, lbId) = await UpsertMessageAsync(channel, lbEmbed, lbComponents,
-            state.LootbarMessageId, "Lootbar", ct);
+        var (lbChanged, lbId) = await UpsertMessageAsync(
+            channel, lbEmbed, lbComponents, state.LootbarMessageId, "Lootbar", ct);
         state.LootbarMessageId = lbId;
         changed |= lbChanged;
 
@@ -131,8 +117,25 @@ public class ShopBackgroundService : BackgroundService
         _logger.LogInformation("Shop refresh completed");
     }
 
-    // ── Helper: edit nếu message tồn tại, tạo mới nếu bị xóa ───────────────
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
+    /// <summary>Tính thời gian chờ đến 00:00 hoặc 12:00 tiếp theo (giờ VN).</summary>
+    private static TimeSpan GetDelayUntilNextRefresh()
+    {
+        var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, VnTimeZone);
+        var todayTime = now.TimeOfDay;
+
+        var next = RefreshTimes
+            .Select(t => t > todayTime ? t : t.Add(TimeSpan.FromHours(24)))
+            .Min();
+
+        return next - todayTime;
+    }
+
+    /// <summary>
+    /// Edit message nếu tồn tại; tạo mới nếu đã bị xóa.
+    /// Trả về (changed, messageId) — changed=true khi tạo mới (cần save state).
+    /// </summary>
     private async Task<(bool changed, ulong messageId)> UpsertMessageAsync(
         IMessageChannel channel,
         Embed embed,
@@ -144,13 +147,26 @@ public class ShopBackgroundService : BackgroundService
         IUserMessage? existing = null;
         if (currentId != 0)
         {
-            try { existing = await channel.GetMessageAsync(currentId) as IUserMessage; }
-            catch { /* message bị xóa */ }
+            try
+            {
+                existing = await channel.GetMessageAsync(currentId) as IUserMessage;
+            }
+            catch (Exception ex)
+            {
+                // Message bị xóa hoặc không accessible — log để biết, rồi tạo mới bên dưới
+                _logger.LogDebug(ex,
+                    "[{Label}] GetMessageAsync({Id}) thất bại — sẽ tạo message mới",
+                    label, currentId);
+            }
         }
 
         if (existing is not null)
         {
-            await existing.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
+            await existing.ModifyAsync(m =>
+            {
+                m.Embed = embed;
+                m.Components = components;
+            });
             _logger.LogInformation("[{Label}] embed updated — {MessageId}", label, existing.Id);
             return (false, existing.Id);
         }
