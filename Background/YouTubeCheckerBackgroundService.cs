@@ -137,11 +137,12 @@ public class YouTubeCheckerBackgroundService : BackgroundService
 
                     if (video.LiveBroadcastContent == "live")
                     {
-                        // Set "live_notified" ngay để tránh gửi thông báo "video mới" sau khi live kết thúc.
+                        // Gửi thông báo live và đánh dấu live_notified
+                        await _discord.SendVideoNotificationAsync(video);
                         _liveStates[videoId] = "live_notified";
                         changed = true;
                         _logger.LogInformation(
-                            "Startup sync [{Channel}]: active live detected, marked live_notified — {VideoId}", channelId, videoId);
+                            "Startup sync [{Channel}]: active live — sent notification & marked live_notified — {VideoId}", channelId, videoId);
                     }
                     else
                     {
