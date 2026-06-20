@@ -79,16 +79,9 @@ public class YouTubeCheckerBackgroundService : BackgroundService
     }
 
     /// <summary>
-    /// Khi bot restart: lấy 5 video mới nhất từ YouTube,
+    /// Khi bot restart: lấy 5 video mới nhất từ mỗi channel YouTube,
     /// đánh dấu tất cả là "video_sent" nếu chưa có status,
     /// trừ video nào đang live thật sự.
-    ///
-    /// FIX: Video đang live → set "live_notified" ngay (thay vì bỏ trống).
-    /// Nếu để status = "none" mà live kết thúc trước lần check tiếp theo,
-    /// CheckYouTubeAsync sẽ không biết đây là live đã qua → gửi "video mới".
-    ///
-    /// ✅ FIX: Load vào _botState / _liveStates (fields) thay vì biến local,
-    /// để CheckYouTubeAsync dùng lại được mà không cần load lại từ disk.
     /// </summary>
     private async Task SyncStateOnStartupAsync()
     {
@@ -97,59 +90,75 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             // ✅ Load vào fields — đây là lần load DUY NHẤT từ disk
             _botState = await _persistence.LoadStateAsync();
             _liveStates = await _liveState.LoadAsync();
+
+            // Migrate legacy LastVideoId (single channel) → LastVideoIds (multi-channel)
+            if (!string.IsNullOrEmpty(_botState.LastVideoId) && _botState.LastVideoIds.Count == 0)
+            {
+                var firstChannel = _config.YoutubeChannelIds.FirstOrDefault();
+                if (firstChannel != null)
+                {
+                    _botState.LastVideoIds[firstChannel] = _botState.LastVideoId;
+                    _logger.LogInformation(
+                        "Migrated legacy LastVideoId={VideoId} → LastVideoIds[{Channel}]",
+                        _botState.LastVideoId, firstChannel);
+                }
+                _botState.LastVideoId = string.Empty;
+            }
+
             var changed = false;
 
-            var videoIds = await _youtube.GetLatestVideoIdsAsync();
-
-            foreach (var videoId in videoIds)
+            foreach (var channelId in _config.YoutubeChannelIds)
             {
-                var currentStatus = _liveStates.GetValueOrDefault(videoId, "none");
+                if (string.IsNullOrWhiteSpace(channelId)) continue;
 
-                // Đã có status rồi → không cần sync
-                if (currentStatus != "none") continue;
+                var lastVideoId = _botState.LastVideoIds.GetValueOrDefault(channelId, string.Empty);
+                var videoIds = await _youtube.GetLatestVideoIdsAsync(channelId);
 
-                // Là LastVideoId đã biết → đánh dấu terminal ngay
-                if (_botState.LastVideoId == videoId)
+                foreach (var videoId in videoIds)
                 {
-                    _liveStates[videoId] = "video_sent";
-                    changed = true;
-                    _logger.LogInformation(
-                        "Startup sync: marked LastVideoId as video_sent — {VideoId}", videoId);
-                    continue;
-                }
+                    var currentStatus = _liveStates.GetValueOrDefault(videoId, "none");
 
-                // Video chưa biết → fetch để kiểm tra có đang live không
-                var video = await _youtube.GetVideoByIdAsync(videoId);
-                if (video is null) continue;
+                    // Đã có status rồi → không cần sync
+                    if (currentStatus != "none") continue;
 
-                if (video.LiveBroadcastContent == "live")
-                {
-                    // FIX: Set "live_notified" ngay thay vì để "none".
-                    //
-                    // Lý do: Nếu live kết thúc trước khi CheckYouTubeAsync chạy,
-                    // status vẫn là "none" → CheckYouTubeAsync thấy video này
-                    // có LiveBroadcastContent="none" + LastVideoId != videoId
-                    // → tưởng là video upload mới → gửi thêm thông báo sai.
-                    //
-                    // Với "live_notified", CheckYouTubeAsync sẽ nhận ra đây là
-                    // live đã kết thúc (wasLive = true) → chỉ đánh terminal, không gửi.
-                    _liveStates[videoId] = "live_notified";
-                    changed = true;
-                    _logger.LogInformation(
-                        "Startup sync: active live detected, marked live_notified — {VideoId}", videoId);
-                }
-                else
-                {
-                    // Video cũ hoặc video không biết → đánh dấu terminal
-                    _liveStates[videoId] = "video_sent";
-                    changed = true;
-                    _logger.LogInformation(
-                        "Startup sync: marked old video as video_sent — {VideoId}", videoId);
+                    // Là LastVideoId đã biết của channel này → đánh dấu terminal ngay
+                    if (lastVideoId == videoId)
+                    {
+                        _liveStates[videoId] = "video_sent";
+                        changed = true;
+                        _logger.LogInformation(
+                            "Startup sync [{Channel}]: marked LastVideoId as video_sent — {VideoId}", channelId, videoId);
+                        continue;
+                    }
+
+                    // Video chưa biết → fetch để kiểm tra có đang live không
+                    var video = await _youtube.GetVideoByIdAsync(videoId);
+                    if (video is null) continue;
+
+                    if (video.LiveBroadcastContent == "live")
+                    {
+                        // Set "live_notified" ngay để tránh gửi thông báo "video mới" sau khi live kết thúc.
+                        _liveStates[videoId] = "live_notified";
+                        changed = true;
+                        _logger.LogInformation(
+                            "Startup sync [{Channel}]: active live detected, marked live_notified — {VideoId}", channelId, videoId);
+                    }
+                    else
+                    {
+                        // Video cũ hoặc video không biết → đánh dấu terminal
+                        _liveStates[videoId] = "video_sent";
+                        changed = true;
+                        _logger.LogInformation(
+                            "Startup sync [{Channel}]: marked old video as video_sent — {VideoId}", channelId, videoId);
+                    }
                 }
             }
 
             if (changed)
                 await _liveState.SaveAsync(_liveStates);
+
+            // Lưu state (có thể đã migrate)
+            await _persistence.SaveStateAsync(_botState);
         }
         catch (Exception ex)
         {
@@ -159,93 +168,100 @@ public class YouTubeCheckerBackgroundService : BackgroundService
 
     private async Task CheckYouTubeAsync(CancellationToken ct)
     {
-        var videoIds = await _youtube.GetLatestVideoIdsAsync();
-        if (videoIds.Count == 0) return;
-
         // ✅ FIX: Dùng _botState / _liveStates từ memory — KHÔNG load lại từ disk.
         // Load lại từ disk mỗi tick là root cause của duplicate notifications.
         var stateChanged = false;
         var liveChanged = false;
 
-        foreach (var videoId in videoIds)
+        foreach (var channelId in _config.YoutubeChannelIds)
         {
-            if (ct.IsCancellationRequested) break;
+            if (string.IsNullOrWhiteSpace(channelId) || ct.IsCancellationRequested) break;
 
-            var currentStatus = _liveStates.GetValueOrDefault(videoId, "none");
+            var videoIds = await _youtube.GetLatestVideoIdsAsync(channelId);
+            if (videoIds.Count == 0) continue;
 
-            // Skip terminal
-            if (TerminalStatuses.Contains(currentStatus))
+            var lastVideoId = _botState.LastVideoIds.GetValueOrDefault(channelId, string.Empty);
+
+            foreach (var videoId in videoIds)
             {
-                _logger.LogDebug("Skip {VideoId} — terminal ({Status})", videoId, currentStatus);
-                continue;
-            }
+                if (ct.IsCancellationRequested) break;
 
-            // Skip LastVideoId không có live state (video cũ trước khi có liveStates)
-            if (_botState.LastVideoId == videoId && currentStatus == "none")
-            {
-                _liveStates[videoId] = "video_sent";
-                liveChanged = true;
-                _logger.LogDebug("Skip & mark {VideoId} — LastVideoId with no live state", videoId);
-                continue;
-            }
+                var currentStatus = _liveStates.GetValueOrDefault(videoId, "none");
 
-            var video = await _youtube.GetVideoByIdAsync(videoId);
-            if (video is null) continue;
-
-            if (video.LiveBroadcastContent == "live")
-            {
-                if (!currentStatus.StartsWith("live_notified"))
+                // Skip terminal
+                if (TerminalStatuses.Contains(currentStatus))
                 {
-                    await _discord.SendVideoNotificationAsync(video);
-                    _liveStates[videoId] = "live_notified";
+                    _logger.LogDebug("Skip {VideoId} — terminal ({Status})", videoId, currentStatus);
+                    continue;
+                }
+
+                // Skip LastVideoId không có live state (video cũ trước khi có liveStates)
+                if (lastVideoId == videoId && currentStatus == "none")
+                {
+                    _liveStates[videoId] = "video_sent";
                     liveChanged = true;
-                    _logger.LogInformation("LIVE notification sent — {VideoId}", videoId);
+                    _logger.LogDebug("Skip & mark {VideoId} — LastVideoId with no live state", videoId);
+                    continue;
+                }
+
+                var video = await _youtube.GetVideoByIdAsync(videoId);
+                if (video is null) continue;
+
+                if (video.LiveBroadcastContent == "live")
+                {
+                    if (!currentStatus.StartsWith("live_notified"))
+                    {
+                        await _discord.SendVideoNotificationAsync(video);
+                        _liveStates[videoId] = "live_notified";
+                        liveChanged = true;
+                        _logger.LogInformation("LIVE notification sent [{Channel}] — {VideoId}", channelId, videoId);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Live still active, skip — {VideoId}", videoId);
+                    }
+                }
+                else if (video.LiveBroadcastContent == "upcoming")
+                {
+                    if (currentStatus == "none")
+                    {
+                        _liveStates[videoId] = "upcoming";
+                        liveChanged = true;
+                        _logger.LogInformation("Upcoming detected [{Channel}] — {VideoId}", channelId, videoId);
+                    }
                 }
                 else
                 {
-                    _logger.LogDebug("Live still active, skip — {VideoId}", videoId);
-                }
-            }
-            else if (video.LiveBroadcastContent == "upcoming")
-            {
-                if (currentStatus == "none")
-                {
-                    _liveStates[videoId] = "upcoming";
-                    liveChanged = true;
-                    _logger.LogInformation("Upcoming detected — {VideoId}", videoId);
-                }
-            }
-            else
-            {
-                // LiveBroadcastContent = "none":
-                // Có thể là (A) video upload thường mới, hoặc (B) livestream vừa kết thúc.
-                var wasLive = currentStatus.StartsWith("live_notified")
-                           || currentStatus == "upcoming";
+                    // LiveBroadcastContent = "none":
+                    // Có thể là (A) video upload thường mới, hoặc (B) livestream vừa kết thúc.
+                    var wasLive = currentStatus.StartsWith("live_notified")
+                               || currentStatus == "upcoming";
 
-                if (wasLive)
-                {
-                    // Livestream vừa kết thúc → đánh terminal, KHÔNG gửi "video mới"
-                    _liveStates[videoId] = "video_sent";
-                    liveChanged = true;
-                    _logger.LogInformation(
-                        "Live ended (was {Status}) → video_sent, no re-notify — {VideoId}",
-                        currentStatus, videoId);
-                }
-                else if (_botState.LastVideoId != videoId)
-                {
-                    // Video upload thường thật sự mới → gửi thông báo
-                    await _discord.SendVideoNotificationAsync(video);
-                    _botState.LastVideoId = videoId;
-                    stateChanged = true;
-                    _liveStates[videoId] = "video_sent";
-                    liveChanged = true;
-                    _logger.LogInformation("VIDEO notification sent — {VideoId}", videoId);
-                    break; // Chỉ 1 video mới nhất mỗi lần check
-                }
-                else
-                {
-                    // Video đã biết, không phải live, không cần làm gì
-                    _logger.LogDebug("Skip known non-live video — {VideoId}", videoId);
+                    if (wasLive)
+                    {
+                        // Livestream vừa kết thúc → đánh terminal, KHÔNG gửi "video mới"
+                        _liveStates[videoId] = "video_sent";
+                        liveChanged = true;
+                        _logger.LogInformation(
+                            "Live ended (was {Status}) → video_sent, no re-notify [{Channel}] — {VideoId}",
+                            currentStatus, channelId, videoId);
+                    }
+                    else if (lastVideoId != videoId)
+                    {
+                        // Video upload thường thật sự mới → gửi thông báo
+                        await _discord.SendVideoNotificationAsync(video);
+                        _botState.LastVideoIds[channelId] = videoId;
+                        stateChanged = true;
+                        _liveStates[videoId] = "video_sent";
+                        liveChanged = true;
+                        _logger.LogInformation("VIDEO notification sent [{Channel}] — {VideoId}", channelId, videoId);
+                        break; // Chỉ 1 video mới nhất mỗi channel mỗi lần check
+                    }
+                    else
+                    {
+                        // Video đã biết, không phải live, không cần làm gì
+                        _logger.LogDebug("Skip known non-live video — {VideoId}", videoId);
+                    }
                 }
             }
         }

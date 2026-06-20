@@ -28,7 +28,7 @@ public interface ILiveStateService
 
 public interface IYouTubeApiService
 {
-    Task<List<string>> GetLatestVideoIdsAsync();
+    Task<List<string>> GetLatestVideoIdsAsync(string channelId);
     Task<VideoInfo?> GetVideoByIdAsync(string videoId);
 }
 

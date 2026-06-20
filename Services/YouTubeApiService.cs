@@ -25,8 +25,8 @@ public class YouTubeApiService : IYouTubeApiService
     private readonly BotConfiguration _config;
     private readonly ILogger<YouTubeApiService> _logger;
 
-    // FIX BUG #2: Cache playlistId — chỉ fetch 1 lần duy nhất khi startup.
-    private string? _cachedPlaylistId;
+    // FIX BUG #2: Cache playlistId per channel — chỉ fetch 1 lần duy nhất per channel.
+    private readonly Dictionary<string, string> _cachedPlaylistIds = new();
 
     public YouTubeApiService(
         IOptions<BotConfiguration> config,
@@ -55,33 +55,34 @@ public class YouTubeApiService : IYouTubeApiService
         _logger.LogInformation("YouTubeApiService initialized");
     }
 
-    public async Task<List<string>> GetLatestVideoIdsAsync()
+    public async Task<List<string>> GetLatestVideoIdsAsync(string channelId)
     {
         try
         {
-            // FIX BUG #2: Chỉ gọi Channels.List khi chưa có cache.
+            // FIX BUG #2: Chỉ gọi Channels.List khi chưa có cache cho channel này.
             // playlistId là hằng số của channel — không bao giờ thay đổi.
-            if (_cachedPlaylistId == null)
+            if (!_cachedPlaylistIds.TryGetValue(channelId, out var playlistId))
             {
                 _logger.LogInformation("Fetching playlistId for channel {Id} (first time, will be cached)...",
-                    _config.YoutubeChannelId);
+                    channelId);
 
                 var channelReq = _ytClient.Channels.List("contentDetails");
-                channelReq.Id = _config.YoutubeChannelId;
+                channelReq.Id = channelId;
                 var channelResp = await channelReq.ExecuteAsync();
 
                 if (channelResp.Items is null || channelResp.Items.Count == 0)
                 {
-                    _logger.LogWarning("Channel không tìm thấy: {Id}", _config.YoutubeChannelId);
+                    _logger.LogWarning("Channel không tìm thấy: {Id}", channelId);
                     return [];
                 }
 
-                _cachedPlaylistId = channelResp.Items[0].ContentDetails.RelatedPlaylists.Uploads;
-                _logger.LogInformation("PlaylistId cached: {PlaylistId}", _cachedPlaylistId);
+                playlistId = channelResp.Items[0].ContentDetails.RelatedPlaylists.Uploads;
+                _cachedPlaylistIds[channelId] = playlistId;
+                _logger.LogInformation("PlaylistId cached for {ChannelId}: {PlaylistId}", channelId, playlistId);
             }
 
             var playlistReq = _ytClient.PlaylistItems.List("snippet");
-            playlistReq.PlaylistId = _cachedPlaylistId;
+            playlistReq.PlaylistId = playlistId;
             playlistReq.MaxResults = 5;
             var playlistResp = await playlistReq.ExecuteAsync();
 
@@ -105,7 +106,7 @@ public class YouTubeApiService : IYouTubeApiService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "GetLatestVideoIdsAsync thất bại");
+            _logger.LogError(ex, "GetLatestVideoIdsAsync thất bại — channelId={ChannelId}", channelId);
             return [];
         }
     }

@@ -39,8 +39,11 @@ public class BotConfiguration
     [Required(ErrorMessage = "YoutubeApiKey không được để trống")]
     public string YoutubeApiKey { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "YoutubeChannelId không được để trống")]
-    public string YoutubeChannelId { get; set; } = string.Empty;
+    /// <summary>
+    /// Danh sách Channel ID YouTube cần theo dõi.
+    /// Hỗ trợ nhiều kênh — mỗi kênh đều thông báo vào cùng VideoChannelId / LiveChannelId.
+    /// </summary>
+    public List<string> YoutubeChannelIds { get; set; } = new();
 
     /// <summary>Khoảng thời gian poll YouTube API, tính bằng giây. Default 120s.</summary>
     [Range(30, 3600, ErrorMessage = "CheckIntervalSeconds phải từ 30 đến 3600")]
