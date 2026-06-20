@@ -16,9 +16,11 @@ The shop system is built around a **provider pattern** — currently integrating
 ## Features
 
 ### YouTube Monitoring
-- Polls YouTube Data API v3 on a configurable interval to detect new video uploads and livestream start/end events
+- Monitors **multiple YouTube channels** simultaneously — each polled independently on a configurable interval
+- Detects new video uploads and livestream start/end events via YouTube Data API v3
 - Sends rich Discord embeds to dedicated channels with role pings and full deduplication
 - Restart-safe: survives container restarts without re-sending notifications via persistent JSON state
+- On restart, any channel already live triggers an immediate notification rather than being silently skipped
 
 ### Multi-Provider Game Shop Discount Board
 - Aggregates real-time discount data from multiple independent shop providers (**LDShop** and **Lootbar**)
@@ -174,7 +176,10 @@ BotConfiguration__YoutubeApiKey=YOUR_YOUTUBE_API_KEY
   "BotConfiguration": {
     "DiscordToken":   "YOUR_DISCORD_BOT_TOKEN",
     "YoutubeApiKey":  "YOUR_YOUTUBE_API_KEY",
-    "YoutubeChannelId": "UCxxxxxxxxxxxxxxxxxxxxxxxx",
+    "YoutubeChannelIds": [
+      "UCxxxxxxxxxxxxxxxxxxxxxxxx",
+      "UCyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    ],
 
     "LiveChannelId":   1234567890123456789,
     "VideoChannelId":  1234567890123456789,
@@ -221,7 +226,7 @@ BotConfiguration__YoutubeApiKey=YOUR_YOUTUBE_API_KEY
 |---|:---:|---|
 | `DiscordToken` | ✅ | Bot token từ Discord Developer Portal |
 | `YoutubeApiKey` | ✅ | YouTube Data API v3 key |
-| `YoutubeChannelId` | ✅ | ID kênh YouTube cần monitor (`UC...`) |
+| `YoutubeChannelIds` | ✅ | Mảng ID kênh YouTube cần monitor (`UC...`), hỗ trợ nhiều kênh |
 | `LiveChannelId` | ✅ | Channel Discord nhận thông báo livestream |
 | `VideoChannelId` | ✅ | Channel Discord nhận thông báo video mới |
 | `ShopChannelId` | ✅ | Channel Discord để đăng shop embed |
@@ -315,6 +320,8 @@ GitHub Actions runs on every push to `main`: restore → build Release → valid
 - **Timezone-aware scheduling**: next refresh is calculated in Vietnam Standard Time (UTC+7) using `TimeZoneInfo`, correctly handling the midnight boundary.
 - **Lazy IEnumerable guard**: provider list is materialized with `.ToList()` before `Task.WhenAll` — without this, LINQ deferred execution silently skipped providers on the first run.
 - **Async ref workaround**: `UpsertMessageAsync` returns `(bool changed, ulong messageId)` instead of `ref ulong` — async methods cannot have `ref` parameters in C#.
+- **Multi-channel YouTube monitoring**: `YoutubeChannelIds` is an array — each channel is polled independently per tick, with per-channel `LastVideoId` tracking. Legacy single-channel state is auto-migrated on first boot.
+- **Startup live re-notification**: on restart, if a channel is actively live and not yet notified, the startup sync sends the notification immediately rather than silently marking it `live_notified` and skipping it.
 - **Resilience**: all external HTTP calls go through Polly's `AddStandardResilienceHandler` — automatic retries with exponential backoff and circuit breaking on transient failures.
 - **Structured logging**: Serilog writes JSON-structured logs to both console and daily rolling files (7-day retention), with Discord and Microsoft noise suppressed to `Warning` level.
 
