@@ -79,7 +79,8 @@ public partial class TikTokService : ITikTokService
         }
 
         var html = await response.Content.ReadAsStringAsync();
-        _logger.LogInformation("TikTok @{Username} — HTML {HtmlLength} chars", username, html.Length);
+        _logger.LogInformation("TikTok @{Username} — HTML {HtmlLength} chars | Preview: {Preview}",
+            username, html.Length, html.Length > 500 ? html[..500] : html);
 
         var match = UniversalDataRegex().Match(html);
         if (!match.Success)
