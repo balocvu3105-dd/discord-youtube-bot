@@ -151,8 +151,8 @@ try
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
         {
             AllowAutoRedirect = true,
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-            CookieContainer = new CookieContainer()
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+            UseCookies = false // Tự set Cookie header thủ công trong TikTokService
         })
         .ConfigureHttpClient(client =>
         {

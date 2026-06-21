@@ -87,7 +87,15 @@ public class TikTokService : ITikTokService
                   $"&msToken={msToken}" +
                   $"&uniqueId={Uri.EscapeDataString(username)}";
 
-        using var response = await _httpClient.GetAsync(url);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+
+        // Gửi Cookie header — TikTok webcast API đọc msToken từ cookie, không phải query param
+        var cookieHeader = string.IsNullOrEmpty(_config.TikTokCookies)
+            ? $"msToken={_config.TikTokMsToken}"
+            : _config.TikTokCookies;
+        request.Headers.Add("Cookie", cookieHeader);
+
+        using var response = await _httpClient.SendAsync(request);
 
         _logger.LogInformation("TikTok @{Username} — room/info HTTP {Status}", username, (int)response.StatusCode);
 
