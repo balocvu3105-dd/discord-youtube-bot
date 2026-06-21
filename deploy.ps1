@@ -11,19 +11,17 @@ $PROJECT_DIR = "/root/bot/discord-youtube-bot"
 # ────────────────────────────────────────────────────────────
 
 $REPO = "D:\source code\YouTubeDiscordBot"
-$COMMIT_MSG = "feat: add TanCataww channel + refactor & optimize
+$COMMIT_MSG = "feat: add TikTok live notification
 
-- Add YouTube channel TanCataww (UCS8tTU195JRDUbuagiIwvgQ) to YoutubeChannelIds
-- Models: tach Models.cs thanh 5 file rieng (BotState, VideoInfo, ShopGameConfig, ShopMessageState, LdShopPromo)
-- ShopService: extract helpers, validate URL affiliate
-- LdShopScraperService: IHttpClientFactory, fix _nameCache thread safety
-- ShopCommandModule: fix race condition, an ex.Message, RequireContext(Guild), cooldown 60s
-- LdShopDiscountService: parallel WarmCacheAsync (Task.WhenAll), CancellationToken
-- LootbarDiscountService: CancellationToken, pass ct xuong HttpClient
-- AsyncJsonStore: PropertyNameCaseInsensitive, tach ReadOptions/WriteOptions
-- ShopBackgroundService: log exception trong UpsertMessageAsync
-- DiscordService: StatusChannelId startup notification
-- Log noise: downgrade API response logs xuong LogDebug"
+- TikTokService: scrape tiktok.com/@username/live, detect roomId tu JSON
+  __UNIVERSAL_DATA_FOR_REHYDRATION__, ping webcast check_alive endpoint
+- TikTokCheckerBackgroundService: poll interval 60s, gui Discord khi live
+  bat dau, reset state khi live ket thuc, persist state qua restart
+- BotConfiguration: them TikTokUsernames, TikTokLiveChannelId,
+  TikTokLiveRoleId, TikTokCheckIntervalSeconds, TikTokLiveStateFilePath
+- Program.cs: dang ky HttpClient<ITikTokService, TikTokService>,
+  AddHostedService<TikTokCheckerBackgroundService>
+- appsettings.json: theo doi @catawuwa, chung LiveChannelId & LiveRoleId"
 
 Set-Location $REPO
 
@@ -37,8 +35,7 @@ if (Test-Path $lockFile) {
 }
 
 Write-Host "`n[2/5] Git add all changes..." -ForegroundColor Cyan
-git add -u
-git add deploy.ps1
+git add -A
 
 if ($LASTEXITCODE -ne 0) { Write-Host "Git add that bai!" -ForegroundColor Red; exit 1 }
 
@@ -59,15 +56,27 @@ Write-Host "`n[5/5] Deploy len VPS..." -ForegroundColor Cyan
 $VPS_COMMANDS = @"
 cd $PROJECT_DIR
 
-# Them TanCataww channel ID vao appsettings.json neu chua co
-if ! grep -q 'UCS8tTU195JRDUbuagiIwvgQ' appsettings.json 2>/dev/null; then
-    sed -i 's/"UCHfFNHHKK6phqWfordByyEQ"/"UCHfFNHHKK6phqWfordByyEQ",\n      "UCS8tTU195JRDUbuagiIwvgQ"/' appsettings.json
-    echo '  [OK] Da them TanCataww channel ID vao appsettings.json'
+# Them TikTok config vao appsettings.json neu chua co
+if ! grep -q 'TikTokUsernames' appsettings.json 2>/dev/null; then
+    python3 - <<'PYEOF'
+import json, sys
+with open('appsettings.json', 'r', encoding='utf-8') as f:
+    cfg = json.load(f)
+bc = cfg.setdefault('BotConfiguration', {})
+bc.setdefault('TikTokUsernames', ['catawuwa'])
+bc.setdefault('TikTokLiveChannelId', 1491472477384081541)
+bc.setdefault('TikTokLiveRoleId', 1505506790757105704)
+bc.setdefault('TikTokCheckIntervalSeconds', 60)
+bc.setdefault('TikTokLiveStateFilePath', 'data/tiktok_live_state.json')
+with open('appsettings.json', 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+print('  [OK] Da them TikTok config vao appsettings.json')
+PYEOF
 else
-    echo '  [SKIP] TanCataww channel ID da co san'
+    echo '  [SKIP] TikTok config da co san'
 fi
 
-git pull origin main && docker compose up --build -d && echo '=== Deploy OK ==='
+git stash && git pull origin main && docker compose up --build -d && echo '=== Deploy OK ==='
 "@
 
 ssh "${VPS_USER}@${VPS_IP}" $VPS_COMMANDS

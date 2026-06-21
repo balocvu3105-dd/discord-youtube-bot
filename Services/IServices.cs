@@ -49,3 +49,12 @@ public interface IShopMessagePersistenceService
     Task<ShopMessageState> LoadAsync();
     Task SaveAsync(ShopMessageState state);
 }
+
+public interface ITikTokService
+{
+    /// <summary>
+    /// Kiểm tra một TikTok username có đang live không.
+    /// Trả về true nếu đang live, false nếu không live hoặc không xác định được.
+    /// </summary>
+    Task<bool> IsLiveAsync(string username);
+}

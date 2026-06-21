@@ -73,4 +73,24 @@ public class BotConfiguration
     public string LootbarShopLink { get; set; } = string.Empty;
 
     public List<ShopGameConfig> ShopGames { get; set; } = new();
+
+    // ── TikTok ───────────────────────────────────────────────────────────
+    /// <summary>
+    /// Danh sách username TikTok cần theo dõi live (không có @).
+    /// Ví dụ: ["catawuwa", "username2"]
+    /// </summary>
+    public List<string> TikTokUsernames { get; set; } = new();
+
+    /// <summary>Discord channel để gửi thông báo TikTok live.</summary>
+    public ulong TikTokLiveChannelId { get; set; }
+
+    /// <summary>Role ping khi TikTok live. 0 = không ping.</summary>
+    public ulong TikTokLiveRoleId { get; set; }
+
+    /// <summary>Khoảng thời gian poll TikTok, tính bằng giây. Default 60s.</summary>
+    [Range(30, 3600)]
+    public int TikTokCheckIntervalSeconds { get; set; } = 60;
+
+    /// <summary>Đường dẫn file lưu TikTok live state.</summary>
+    public string TikTokLiveStateFilePath { get; set; } = "data/tiktok_live_state.json";
 }
