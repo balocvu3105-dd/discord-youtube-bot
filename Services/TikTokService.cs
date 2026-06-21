@@ -23,6 +23,16 @@ public partial class TikTokService : ITikTokService
         RegexOptions.Singleline)]
     private static partial Regex UniversalDataRegex();
 
+    // Fallback: tìm roomId trực tiếp trong HTML thô (bất kỳ script nào)
+    // TikTok thỉnh thoảng đổi tên script container nhưng roomId luôn là chuỗi số 19 ký tự
+    [GeneratedRegex(@"""roomId""\s*:\s*""(\d{10,})""")]
+    private static partial Regex RoomIdRawRegex();
+
+    // Dấu hiệu TikTok đang trả về trang bot-check (không có nội dung thực)
+    [GeneratedRegex(@"<title[^>]*>\s*(?:Please Wait|Just a moment|Access Denied|Verifying)",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex BotCheckPageRegex();
+
     public TikTokService(HttpClient httpClient, ILogger<TikTokService> logger)
     {
         _httpClient = httpClient;
@@ -37,13 +47,13 @@ public partial class TikTokService : ITikTokService
             var roomId = await GetRoomIdAsync(username);
             if (string.IsNullOrEmpty(roomId))
             {
-                _logger.LogDebug("TikTok @{Username} — không tìm thấy roomId (không live)", username);
+                _logger.LogInformation("TikTok @{Username} — không tìm thấy roomId (không live hoặc bị block)", username);
                 return false;
             }
 
             // Bước 2: Kiểm tra room còn alive không
             var alive = await CheckRoomAliveAsync(roomId);
-            _logger.LogDebug("TikTok @{Username} — roomId={RoomId}, alive={Alive}", username, roomId, alive);
+            _logger.LogInformation("TikTok @{Username} — roomId={RoomId}, alive={Alive}", username, roomId, alive);
             return alive;
         }
         catch (Exception ex)
@@ -69,24 +79,58 @@ public partial class TikTokService : ITikTokService
         if (response.RequestMessage?.RequestUri is { } finalUri
             && !finalUri.PathAndQuery.Contains("/live", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogDebug("TikTok @{Username} — redirect ra khỏi /live → không live", username);
+            _logger.LogInformation("TikTok @{Username} — redirect ra khỏi /live → không live (final URL: {Url})",
+                username, finalUri.PathAndQuery);
             return null;
         }
 
         var html = await response.Content.ReadAsStringAsync();
 
-        var match = UniversalDataRegex().Match(html);
-        if (!match.Success)
+        // Kiểm tra bot detection page TRƯỚC (Cloudflare/TikTok challenge)
+        if (BotCheckPageRegex().IsMatch(html))
         {
-            _logger.LogDebug("TikTok @{Username} — không tìm thấy __UNIVERSAL_DATA_FOR_REHYDRATION__", username);
+            _logger.LogWarning(
+                "TikTok @{Username} — phát hiện trang bot-check (Cloudflare/TikTok challenge). " +
+                "Bot có thể bị block. Cần xem xét giải pháp thay thế.", username);
             return null;
         }
 
-        var json = match.Groups[1].Value;
-        using var doc = JsonDocument.Parse(json);
+        string? roomId = null;
 
-        // Duyệt qua tất cả properties để tìm roomId
-        return FindRoomId(doc.RootElement);
+        // Bước 1: thử parse __UNIVERSAL_DATA_FOR_REHYDRATION__
+        var match = UniversalDataRegex().Match(html);
+        if (match.Success)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(match.Groups[1].Value);
+                roomId = FindRoomId(doc.RootElement);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "TikTok @{Username} — không parse được __UNIVERSAL_DATA_FOR_REHYDRATION__ JSON", username);
+            }
+        }
+        else
+        {
+            _logger.LogInformation("TikTok @{Username} — không tìm thấy __UNIVERSAL_DATA_FOR_REHYDRATION__, thử fallback regex", username);
+        }
+
+        // Bước 2: fallback — tìm roomId trực tiếp trong toàn bộ HTML
+        if (string.IsNullOrEmpty(roomId))
+        {
+            var rawMatch = RoomIdRawRegex().Match(html);
+            if (rawMatch.Success)
+            {
+                roomId = rawMatch.Groups[1].Value;
+                _logger.LogInformation("TikTok @{Username} — tìm thấy roomId qua fallback regex: {RoomId}", username, roomId);
+            }
+        }
+
+        if (string.IsNullOrEmpty(roomId))
+            _logger.LogInformation("TikTok @{Username} — không tìm thấy roomId trong HTML ({HtmlLength} chars)", username, html.Length);
+
+        return roomId;
     }
 
     /// <summary>
