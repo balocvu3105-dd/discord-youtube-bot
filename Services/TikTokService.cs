@@ -1,27 +1,25 @@
 using Microsoft.Extensions.Logging;
-using System.Net;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace YouTubeDiscordBot.Services;
 
 /// <summary>
-/// Kiểm tra TikTok live status bằng cách scrape trang profile.
-/// Không cần API key — dùng endpoint webcast public của TikTok.
+/// Kiểm tra TikTok live status qua webcast API (webcast.tiktok.com).
+/// Không dùng scrape www.tiktok.com vì bị SlardarWAF (ByteDance WAF) chặn —
+/// trả về 1155-char JS challenge thay vì HTML thật.
 ///
 /// Cơ chế:
-///   1. Lấy roomId từ trang @username/live (JSON __UNIVERSAL_DATA_FOR_REHYDRATION__)
-///   2. Ping webcast endpoint để xác nhận room còn alive
+///   1. Gọi webcast/room/info/?uniqueId= để lấy roomId + room.status
+///   2. room.status == 2 → đang live
+///   3. Fallback: ping check_alive nếu có roomId nhưng status không rõ
 /// </summary>
-public partial class TikTokService : ITikTokService
+public class TikTokService : ITikTokService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<TikTokService> _logger;
 
-    // Regex trích xuất block JSON của __UNIVERSAL_DATA_FOR_REHYDRATION__
-    [GeneratedRegex(@"<script[^>]*id=""__UNIVERSAL_DATA_FOR_REHYDRATION__""[^>]*>(.*?)</script>",
-        RegexOptions.Singleline)]
-    private static partial Regex UniversalDataRegex();
+    private const string WebcastBase = "https://webcast.tiktok.com/webcast";
+    private const string Aid = "1988";
 
     public TikTokService(HttpClient httpClient, ILogger<TikTokService> logger)
     {
@@ -33,18 +31,26 @@ public partial class TikTokService : ITikTokService
     {
         try
         {
-            // Bước 1: Lấy roomId từ trang /live
-            var roomId = await GetRoomIdAsync(username);
-            if (string.IsNullOrEmpty(roomId))
+            var (roomId, isLiveFromInfo) = await GetRoomInfoAsync(username);
+
+            if (isLiveFromInfo.HasValue)
             {
-                _logger.LogDebug("TikTok @{Username} — không tìm thấy roomId (không live)", username);
-                return false;
+                _logger.LogInformation("TikTok @{Username} — room/info: roomId={RoomId}, live={Live}",
+                    username, roomId ?? "null", isLiveFromInfo.Value);
+                return isLiveFromInfo.Value;
             }
 
-            // Bước 2: Kiểm tra room còn alive không
-            var alive = await CheckRoomAliveAsync(roomId);
-            _logger.LogDebug("TikTok @{Username} — roomId={RoomId}, alive={Alive}", username, roomId, alive);
-            return alive;
+            // Có roomId nhưng status không rõ → ping check_alive
+            if (!string.IsNullOrEmpty(roomId))
+            {
+                var alive = await CheckRoomAliveAsync(roomId);
+                _logger.LogInformation("TikTok @{Username} — check_alive: roomId={RoomId}, alive={Alive}",
+                    username, roomId, alive);
+                return alive;
+            }
+
+            _logger.LogInformation("TikTok @{Username} — không xác định được trạng thái live", username);
+            return false;
         }
         catch (Exception ex)
         {
@@ -55,86 +61,68 @@ public partial class TikTokService : ITikTokService
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private async Task<string?> GetRoomIdAsync(string username)
+    /// <summary>
+    /// Gọi webcast/room/info/ — không đi qua SlardarWAF của www.tiktok.com.
+    /// Trả về (roomId, isLive?); isLive=null nếu API không đủ thông tin.
+    /// </summary>
+    private async Task<(string? roomId, bool? isLive)> GetRoomInfoAsync(string username)
     {
-        var url = $"https://www.tiktok.com/@{username}/live";
+        var url = $"{WebcastBase}/room/info/?aid={Aid}&app_language=en&device_platform=web" +
+                  $"&browser_language=en&browser_platform=Win32" +
+                  $"&browser_name=Mozilla&browser_version=5.0" +
+                  $"&uniqueId={Uri.EscapeDataString(username)}";
 
         using var response = await _httpClient.GetAsync(url);
 
-        var finalUrl = response.RequestMessage?.RequestUri?.ToString() ?? "null";
-        _logger.LogInformation(
-            "TikTok @{Username} — HTTP {Status}, finalUrl={FinalUrl}",
-            username, (int)response.StatusCode, finalUrl);
+        _logger.LogInformation("TikTok @{Username} — room/info HTTP {Status}", username, (int)response.StatusCode);
 
-        if (response.StatusCode == HttpStatusCode.NotFound)
-            return null;
+        if (!response.IsSuccessStatusCode) return (null, null);
 
-        // TikTok redirect về trang chính khi không live (301/302 về /@username)
-        // Nếu URL cuối cùng không còn /live → không live
-        if (response.RequestMessage?.RequestUri is { } finalUri
-            && !finalUri.PathAndQuery.Contains("/live", StringComparison.OrdinalIgnoreCase))
+        var body = await response.Content.ReadAsStringAsync();
+        _logger.LogInformation("TikTok @{Username} — room/info preview: {Preview}",
+            username, body.Length > 300 ? body[..300] : body);
+
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        // status_code != 0 → lỗi hoặc user không tồn tại / không live
+        if (root.TryGetProperty("status_code", out var sc) && sc.GetInt32() != 0)
         {
-            _logger.LogDebug("TikTok @{Username} — redirect ra khỏi /live → không live", username);
-            return null;
+            _logger.LogInformation("TikTok @{Username} — room/info status_code={Code}",
+                username, sc.GetInt32());
+            return (null, false);
         }
 
-        var html = await response.Content.ReadAsStringAsync();
-        _logger.LogInformation("TikTok @{Username} — HTML {HtmlLength} chars | Preview: {Preview}",
-            username, html.Length, html.Length > 500 ? html[..500] : html);
+        if (!root.TryGetProperty("data", out var data))
+            return (null, null);
 
-        var match = UniversalDataRegex().Match(html);
-        if (!match.Success)
+        string? roomId = null;
+
+        if (data.TryGetProperty("room", out var room))
         {
-            _logger.LogDebug("TikTok @{Username} — không tìm thấy __UNIVERSAL_DATA_FOR_REHYDRATION__", username);
-            return null;
+            // Lấy roomId
+            if (room.TryGetProperty("id", out var idProp))
+                roomId = idProp.ValueKind == JsonValueKind.String
+                    ? idProp.GetString()
+                    : idProp.GetInt64().ToString();
+
+            // status=2 → live; status=4 → ended/offline
+            if (room.TryGetProperty("status", out var statusProp))
+                return (roomId, statusProp.GetInt32() == 2);
         }
 
-        var json = match.Groups[1].Value;
-        using var doc = JsonDocument.Parse(json);
+        // Một số response trả data.room_id trực tiếp (không có data.room)
+        if (data.TryGetProperty("room_id", out var rid))
+            roomId ??= rid.ValueKind == JsonValueKind.String
+                ? rid.GetString()
+                : rid.GetInt64().ToString();
 
-        // Duyệt qua tất cả properties để tìm roomId
-        return FindRoomId(doc.RootElement);
-    }
-
-    /// <summary>
-    /// Tìm đệ quy "roomId" trong JSON object.
-    /// TikTok thay đổi cấu trúc JSON khá thường xuyên nên dùng cách này để robust hơn.
-    /// </summary>
-    private static string? FindRoomId(JsonElement element, int depth = 0)
-    {
-        if (depth > 10) return null; // tránh đệ quy sâu vô hạn
-
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var prop in element.EnumerateObject())
-            {
-                if ((prop.Name == "roomId" || prop.Name == "room_id")
-                    && prop.Value.ValueKind == JsonValueKind.String)
-                {
-                    var val = prop.Value.GetString();
-                    if (!string.IsNullOrEmpty(val) && val != "0")
-                        return val;
-                }
-
-                var found = FindRoomId(prop.Value, depth + 1);
-                if (found != null) return found;
-            }
-        }
-        else if (element.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in element.EnumerateArray())
-            {
-                var found = FindRoomId(item, depth + 1);
-                if (found != null) return found;
-            }
-        }
-
-        return null;
+        return (roomId, null);
     }
 
     private async Task<bool> CheckRoomAliveAsync(string roomId)
     {
-        var url = $"https://webcast.tiktok.com/webcast/room/check_alive/?aid=1988&room_ids={roomId}";
+        var url = $"{WebcastBase}/room/check_alive/?aid={Aid}&room_ids={roomId}";
 
         using var response = await _httpClient.GetAsync(url);
         if (!response.IsSuccessStatusCode) return false;
@@ -142,7 +130,7 @@ public partial class TikTokService : ITikTokService
         var json = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(json);
 
-        // Response: {"data":[{"room_id":"xxx","alive":true}],"status_code":0}
+        // {"data":[{"room_id":"xxx","alive":true}],"status_code":0}
         if (!doc.RootElement.TryGetProperty("data", out var data))
             return false;
 
