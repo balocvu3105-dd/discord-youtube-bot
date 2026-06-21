@@ -151,30 +151,17 @@ try
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
         {
             AllowAutoRedirect = true,
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
             CookieContainer = new CookieContainer()
         })
         .ConfigureHttpClient(client =>
         {
-            // Chrome 136 full header set — TikTok kiểm tra sec-ch-ua để detect bot
             client.DefaultRequestHeaders.Add("User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36");
-            client.DefaultRequestHeaders.Add("Accept",
-                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7");
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36");
             client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
-            client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
-            // Chrome Client Hints — thiếu headers này TikTok sẽ block như bot
-            client.DefaultRequestHeaders.Add("sec-ch-ua",
-                "\"Google Chrome\";v=\"136\", \"Chromium\";v=\"136\", \"Not.A/Brand\";v=\"24\"");
-            client.DefaultRequestHeaders.Add("sec-ch-ua-mobile", "?0");
-            client.DefaultRequestHeaders.Add("sec-ch-ua-platform", "\"Windows\"");
-            // Fetch metadata
-            client.DefaultRequestHeaders.Add("sec-fetch-dest", "document");
-            client.DefaultRequestHeaders.Add("sec-fetch-mode", "navigate");
-            client.DefaultRequestHeaders.Add("sec-fetch-site", "none");
-            client.DefaultRequestHeaders.Add("sec-fetch-user", "?1");
-            client.DefaultRequestHeaders.Add("upgrade-insecure-requests", "1");
-            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.Add("Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
+            client.Timeout = TimeSpan.FromSeconds(15);
         })
         .AddStandardResilienceHandler();
 
