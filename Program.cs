@@ -15,7 +15,6 @@ using YouTubeDiscordBot.Background;
 using YouTubeDiscordBot.Commands;
 using YouTubeDiscordBot.Config;
 using YouTubeDiscordBot.Services;
-using System.Net;
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
@@ -146,24 +145,8 @@ try
     builder.Services.AddSingleton<IYouTubeApiService, YouTubeApiService>();
 
     // ── TikTok ───────────────────────────────────────────────────────────
-    // AddHttpClient<ITikTokService, TikTokService> đăng ký cả interface lẫn typed client
-    builder.Services.AddHttpClient<ITikTokService, TikTokService>()
-        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-        {
-            AllowAutoRedirect = true,
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
-            UseCookies = false // Tự set Cookie header thủ công trong TikTokService
-        })
-        .ConfigureHttpClient(client =>
-        {
-            client.DefaultRequestHeaders.Add("User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36");
-            client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
-            client.DefaultRequestHeaders.Add("Accept",
-                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
-            client.Timeout = TimeSpan.FromSeconds(15);
-        })
-        .AddStandardResilienceHandler();
+    // TikTokService dùng Python subprocess (tiktok_check.py) — không cần HttpClient
+    builder.Services.AddSingleton<ITikTokService, TikTokService>();
 
     // ── Background Services ──────────────────────────────────────────────
     builder.Services.AddHostedService<YouTubeCheckerBackgroundService>();

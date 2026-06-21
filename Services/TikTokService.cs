@@ -1,35 +1,33 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Text.Json;
+using System.Diagnostics;
 using YouTubeDiscordBot.Config;
 
 namespace YouTubeDiscordBot.Services;
 
 /// <summary>
-/// Kiểm tra TikTok live status qua webcast API (webcast.tiktok.com).
-/// Cần TikTokMsToken từ cookie trình duyệt để bypass xác thực API.
+/// Kiểm tra TikTok live status bằng cách gọi Python script (tiktok_check.py)
+/// sử dụng thư viện TikTokLive — tự quản lý session, không cần cookie thủ công.
 ///
-/// Cách lấy msToken:
-///   1. Mở tiktok.com trong Chrome
-///   2. F12 → Application → Cookies → https://www.tiktok.com
-///   3. Copy giá trị cookie "msToken"
-///   4. Paste vào appsettings.json → BotConfiguration.TikTokMsToken
+/// Yêu cầu:
+///   - Python 3 đã được cài trong container/system
+///   - pip install TikTokLive
+///   - tiktok_check.py phải nằm cùng thư mục với bot (hoặc đường dẫn trong TikTokScriptPath)
 /// </summary>
 public class TikTokService : ITikTokService
 {
-    private readonly HttpClient _httpClient;
     private readonly ILogger<TikTokService> _logger;
     private readonly BotConfiguration _config;
 
-    private const string WebcastBase = "https://webcast.tiktok.com/webcast";
-    private const string Aid = "1988";
+    // Đường dẫn đến script Python — có thể override qua config nếu cần
+    private string ScriptPath => string.IsNullOrEmpty(_config.TikTokScriptPath)
+        ? Path.Combine(AppContext.BaseDirectory, "tiktok_check.py")
+        : _config.TikTokScriptPath;
 
     public TikTokService(
-        HttpClient httpClient,
         IOptions<BotConfiguration> config,
         ILogger<TikTokService> logger)
     {
-        _httpClient = httpClient;
         _config = config.Value;
         _logger = logger;
     }
@@ -38,33 +36,16 @@ public class TikTokService : ITikTokService
     {
         try
         {
-            if (string.IsNullOrEmpty(_config.TikTokMsToken))
-            {
-                _logger.LogWarning("TikTok @{Username} — TikTokMsToken chưa được cấu hình trong appsettings.json. " +
-                    "Vui lòng lấy msToken từ cookie trình duyệt tiktok.com và thêm vào config.", username);
-                return false;
-            }
+            _logger.LogInformation("TikTok @{Username} — chạy tiktok_check.py...", username);
 
-            var (roomId, isLiveFromInfo) = await GetRoomInfoAsync(username);
+            var result = await RunPythonScriptAsync(username);
 
-            if (isLiveFromInfo.HasValue)
-            {
-                _logger.LogInformation("TikTok @{Username} — room/info: roomId={RoomId}, live={Live}",
-                    username, roomId ?? "null", isLiveFromInfo.Value);
-                return isLiveFromInfo.Value;
-            }
+            _logger.LogInformation("TikTok @{Username} — kết quả: {Result}", username, result.Output);
 
-            // Có roomId nhưng status không rõ → ping check_alive
-            if (!string.IsNullOrEmpty(roomId))
-            {
-                var alive = await CheckRoomAliveAsync(roomId);
-                _logger.LogInformation("TikTok @{Username} — check_alive: roomId={RoomId}, alive={Alive}",
-                    username, roomId, alive);
-                return alive;
-            }
+            if (!string.IsNullOrEmpty(result.Stderr))
+                _logger.LogWarning("TikTok @{Username} — stderr: {Stderr}", username, result.Stderr);
 
-            _logger.LogInformation("TikTok @{Username} — không xác định được trạng thái live", username);
-            return false;
+            return result.Output.Trim().Equals("LIVE", StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex)
         {
@@ -75,90 +56,74 @@ public class TikTokService : ITikTokService
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private async Task<(string? roomId, bool? isLive)> GetRoomInfoAsync(string username)
+    private async Task<(string Output, string Stderr)> RunPythonScriptAsync(string username)
     {
-        var msToken = Uri.EscapeDataString(_config.TikTokMsToken);
-        var url = $"{WebcastBase}/room/info/?aid={Aid}&app_language=en&device_platform=web" +
-                  $"&browser_language=en&browser_platform=Win32" +
-                  $"&browser_name=Mozilla&browser_version=5.0%20(Windows%20NT%2010.0%3B%20Win64%3B%20x64)" +
-                  $"&browser_online=true&cookie_enabled=1" +
-                  $"&screen_width=1920&screen_height=1080" +
-                  $"&webcast_sdk_version=1.9.5&update_version_code=1.9.5" +
-                  $"&msToken={msToken}" +
-                  $"&uniqueId={Uri.EscapeDataString(username)}";
+        // Thử python3 trước (Linux/Docker), fallback sang python (Windows)
+        var pythonExecutable = await FindPythonAsync();
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-
-        // Gửi Cookie header — TikTok webcast API đọc msToken từ cookie, không phải query param
-        var cookieHeader = string.IsNullOrEmpty(_config.TikTokCookies)
-            ? $"msToken={_config.TikTokMsToken}"
-            : _config.TikTokCookies;
-        request.Headers.Add("Cookie", cookieHeader);
-
-        using var response = await _httpClient.SendAsync(request);
-
-        _logger.LogInformation("TikTok @{Username} — room/info HTTP {Status}", username, (int)response.StatusCode);
-
-        if (!response.IsSuccessStatusCode) return (null, null);
-
-        var body = await response.Content.ReadAsStringAsync();
-        _logger.LogInformation("TikTok @{Username} — room/info preview: {Preview}",
-            username, body.Length > 300 ? body[..300] : body);
-
-        using var doc = JsonDocument.Parse(body);
-        var root = doc.RootElement;
-
-        if (root.TryGetProperty("status_code", out var sc) && sc.GetInt32() != 0)
+        using var process = new Process
         {
-            _logger.LogInformation("TikTok @{Username} — room/info status_code={Code} (không live hoặc token hết hạn)",
-                username, sc.GetInt32());
-            return (null, false);
-        }
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = pythonExecutable,
+                Arguments = $"\"{ScriptPath}\" \"{username}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            }
+        };
 
-        if (!root.TryGetProperty("data", out var data))
-            return (null, null);
+        process.Start();
 
-        string? roomId = null;
+        // Timeout 30 giây để tránh hang vô hạn
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-        if (data.TryGetProperty("room", out var room))
-        {
-            if (room.TryGetProperty("id", out var idProp))
-                roomId = idProp.ValueKind == JsonValueKind.String
-                    ? idProp.GetString()
-                    : idProp.GetInt64().ToString();
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+        var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
 
-            // status=2 → live; status=4 → ended/offline
-            if (room.TryGetProperty("status", out var statusProp))
-                return (roomId, statusProp.GetInt32() == 2);
-        }
+        await process.WaitForExitAsync(cts.Token);
 
-        if (data.TryGetProperty("room_id", out var rid))
-            roomId ??= rid.ValueKind == JsonValueKind.String
-                ? rid.GetString()
-                : rid.GetInt64().ToString();
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
 
-        return (roomId, null);
+        return (stdout, stderr);
     }
 
-    private async Task<bool> CheckRoomAliveAsync(string roomId)
+    private static string? _cachedPython;
+
+    private static async Task<string> FindPythonAsync()
     {
-        var url = $"{WebcastBase}/room/check_alive/?aid={Aid}&room_ids={roomId}";
+        if (_cachedPython is not null) return _cachedPython;
 
-        using var response = await _httpClient.GetAsync(url);
-        if (!response.IsSuccessStatusCode) return false;
-
-        var json = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(json);
-
-        if (!doc.RootElement.TryGetProperty("data", out var data))
-            return false;
-
-        foreach (var item in data.EnumerateArray())
+        foreach (var candidate in new[] { "python3", "python" })
         {
-            if (item.TryGetProperty("alive", out var alive) && alive.GetBoolean())
-                return true;
+            try
+            {
+                using var probe = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = candidate,
+                        Arguments = "--version",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    }
+                };
+                probe.Start();
+                await probe.WaitForExitAsync();
+                if (probe.ExitCode == 0)
+                {
+                    _cachedPython = candidate;
+                    return candidate;
+                }
+            }
+            catch { /* thử candidate tiếp theo */ }
         }
 
-        return false;
+        _cachedPython = "python3"; // fallback mặc định
+        return _cachedPython;
     }
 }

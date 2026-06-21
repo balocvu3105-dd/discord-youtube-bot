@@ -11,17 +11,14 @@ $PROJECT_DIR = "/root/bot/discord-youtube-bot"
 # ────────────────────────────────────────────────────────────
 
 $REPO = "D:\source code\YouTubeDiscordBot"
-$COMMIT_MSG = "feat: add TikTok live notification
+$COMMIT_MSG = "fix: switch TikTok live check to Python TikTokLive library
 
-- TikTokService: scrape tiktok.com/@username/live, detect roomId tu JSON
-  __UNIVERSAL_DATA_FOR_REHYDRATION__, ping webcast check_alive endpoint
-- TikTokCheckerBackgroundService: poll interval 60s, gui Discord khi live
-  bat dau, reset state khi live ket thuc, persist state qua restart
-- BotConfiguration: them TikTokUsernames, TikTokLiveChannelId,
-  TikTokLiveRoleId, TikTokCheckIntervalSeconds, TikTokLiveStateFilePath
-- Program.cs: dang ky HttpClient<ITikTokService, TikTokService>,
-  AddHostedService<TikTokCheckerBackgroundService>
-- appsettings.json: theo doi @catawuwa, chung LiveChannelId & LiveRoleId"
+- Thay webcast API (bi 10011 do het cookie) bang Python subprocess
+- TikTokService.cs: goi tiktok_check.py thay vi HTTP truc tiep
+- tiktok_check.py: dung TikTokLive library, tu quan ly session/auth
+- Dockerfile: them Python 3 + pip install TikTokLive
+- BotConfiguration: bo TikTokMsToken/TikTokCookies, them TikTokScriptPath
+- Program.cs: doi AddHttpClient sang AddSingleton cho TikTokService"
 
 Set-Location $REPO
 

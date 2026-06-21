@@ -13,4 +13,12 @@ COPY --from=build /app .
 # (sẽ bị override bởi Docker volume mount, nhưng tốt để có sẵn)
 RUN mkdir -p /app/data /app/logs
 
+# Cài Python 3 + TikTokLive để chạy tiktok_check.py
+RUN apt-get update && apt-get install -y python3 python3-pip --no-install-recommends \
+    && pip3 install --break-system-packages TikTokLive \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy script Python vào image
+COPY tiktok_check.py /app/tiktok_check.py
+
 ENTRYPOINT ["dotnet", "YouTubeDiscordBot.dll"]

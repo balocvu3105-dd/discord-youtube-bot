@@ -95,15 +95,8 @@ public class BotConfiguration
     public string TikTokLiveStateFilePath { get; set; } = "data/tiktok_live_state.json";
 
     /// <summary>
-    /// msToken lấy từ cookie TikTok trên trình duyệt (Application → Cookies → tiktok.com → msToken).
-    /// Cần thiết để gọi webcast API. Để trống nếu chưa có.
+    /// Đường dẫn tùy chỉnh đến tiktok_check.py.
+    /// Để trống = dùng thư mục chạy bot (AppContext.BaseDirectory/tiktok_check.py).
     /// </summary>
-    public string TikTokMsToken { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Full cookie string từ trình duyệt để gửi kèm request TikTok webcast API.
-    /// Lấy từ Chrome DevTools → Network → bất kỳ request tiktok.com → copy giá trị header "cookie".
-    /// Quan trọng hơn TikTokMsToken — dùng cái này nếu API vẫn trả 10011.
-    /// </summary>
-    public string TikTokCookies { get; set; } = string.Empty;
+    public string TikTokScriptPath { get; set; } = string.Empty;
 }
