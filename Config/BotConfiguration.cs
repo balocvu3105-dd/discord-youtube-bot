@@ -93,4 +93,10 @@ public class BotConfiguration
 
     /// <summary>Đường dẫn file lưu TikTok live state.</summary>
     public string TikTokLiveStateFilePath { get; set; } = "data/tiktok_live_state.json";
+
+    /// <summary>
+    /// msToken lấy từ cookie TikTok trên trình duyệt (Application → Cookies → tiktok.com → msToken).
+    /// Cần thiết để gọi webcast API. Để trống nếu chưa có.
+    /// </summary>
+    public string TikTokMsToken { get; set; } = string.Empty;
 }
