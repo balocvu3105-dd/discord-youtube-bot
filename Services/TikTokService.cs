@@ -69,7 +69,10 @@ public class TikTokService : ITikTokService
     {
         var url = $"{WebcastBase}/room/info/?aid={Aid}&app_language=en&device_platform=web" +
                   $"&browser_language=en&browser_platform=Win32" +
-                  $"&browser_name=Mozilla&browser_version=5.0" +
+                  $"&browser_name=Mozilla&browser_version=5.0%20(Windows%20NT%2010.0%3B%20Win64%3B%20x64)" +
+                  $"&browser_online=true&cookie_enabled=1" +
+                  $"&screen_width=1920&screen_height=1080" +
+                  $"&webcast_sdk_version=1.9.5&update_version_code=1.9.5" +
                   $"&uniqueId={Uri.EscapeDataString(username)}";
 
         using var response = await _httpClient.GetAsync(url);
