@@ -15,7 +15,7 @@ RUN mkdir -p /app/data /app/logs
 
 # Cài Python 3 + TikTokLive để chạy tiktok_check.py
 RUN apt-get update && apt-get install -y python3 python3-pip --no-install-recommends \
-    && pip3 install --break-system-packages TikTokLive \
+    && pip3 install --break-system-packages TikTokLive==6.6.5 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy script Python vào image

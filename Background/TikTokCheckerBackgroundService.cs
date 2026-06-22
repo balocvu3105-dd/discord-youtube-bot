@@ -38,6 +38,8 @@ public class TikTokCheckerBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _logger.LogInformation("TikTokCheckerBackgroundService — ExecuteAsync started");
+
         if (_config.TikTokUsernames.Count == 0)
         {
             _logger.LogInformation("TikTokCheckerBackgroundService — không có username nào, bỏ qua");
@@ -103,10 +105,11 @@ public class TikTokCheckerBackgroundService : BackgroundService
 
             if (isLive && !wasNotified)
             {
-                // Live bắt đầu → gửi thông báo
+                // Live bắt đầu → gửi thông báo, save ngay để tránh duplicate khi bot restart
                 await SendLiveNotificationAsync(username);
                 _liveNotified[username] = true;
-                stateChanged = true;
+                await SaveStateAsync();   // ← save ngay, không chờ cuối loop
+                stateChanged = false;     // đã save rồi, đánh dấu không cần save lại
                 _logger.LogInformation("TikTok LIVE notification sent — @{Username}", username);
             }
             else if (!isLive && wasNotified)

@@ -1,19 +1,20 @@
 """
-tiktok_check.py — Check TikTok live status using TikTokLive library.
-Không cần cookie thủ công. Library tự quản lý session.
+tiktok_check.py — Check TikTok live status using TikTokLive v6.x.
+
+TikTokLive v6+ API thay đổi hoàn toàn so với v4:
+  - v4: client.connect(fetch_room_info=True) → raise UserOfflineError nếu offline
+  - v6: client.is_live() → trả về bool trực tiếp, KHÔNG cần connect WebSocket
 
 Usage:
     python tiktok_check.py <username>
 
-Exit codes / stdout:
+Stdout:
     LIVE    → user đang live
     OFFLINE → không live hoặc không xác định được
-    ERROR   → lỗi xảy ra (vẫn trả OFFLINE để bot không crash)
 """
 
 import asyncio
 import sys
-import os
 
 
 def main():
@@ -22,42 +23,40 @@ def main():
         return
 
     username = sys.argv[1].lstrip("@")
+    asyncio.run(_check(username))
 
+
+async def _check(username: str):
     try:
         from TikTokLive import TikTokLiveClient
-        from TikTokLive.client.errors import UserOfflineError, UserNotFoundError
     except ImportError:
-        print("ERROR: TikTokLive not installed", file=sys.stderr)
+        print("ERROR: TikTokLive not installed. Run: pip install TikTokLive==6.6.5", file=sys.stderr)
         print("OFFLINE")
         return
 
-    async def check():
-        client = TikTokLiveClient(unique_id=username)
-        try:
-            # fetch_room_info=True lấy thông tin phòng mà không join WebSocket
-            await client.connect(fetch_room_info=True)
-            # Nếu connect thành công (không raise exception) → đang live
-            print("LIVE")
-        except UserOfflineError:
-            print("OFFLINE")
-        except UserNotFoundError:
-            print(f"ERROR: User @{username} not found", file=sys.stderr)
-            print("OFFLINE")
-        except Exception as e:
-            # TikTokLive raise exception khi không live trong một số version
-            err_msg = str(e).lower()
-            if "offline" in err_msg or "not live" in err_msg or "failed to retrieve" in err_msg:
-                print("OFFLINE")
-            else:
-                print(f"ERROR: {e}", file=sys.stderr)
-                print("OFFLINE")
-        finally:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
+    client = TikTokLiveClient(unique_id=f"@{username}")
 
-    asyncio.run(check())
+    try:
+        # TikTokLive v6.x: is_live() kiểm tra trực tiếp qua API, không cần WebSocket
+        # Gọi endpoint: GET /api-live/user/room/?uniqueId=<username>
+        # Trả về True nếu liveRoom.status != 4 (status 4 = offline)
+        is_live: bool = await client.is_live()
+        print("LIVE" if is_live else "OFFLINE")
+
+    except Exception as e:
+        err_type = type(e).__name__
+        err_msg = str(e).lower()
+
+        # Phân loại lỗi thường gặp
+        if any(kw in err_msg for kw in [
+            "user_not_found", "not found", "not capable",
+            "offline", "not live", "not broadcasting"
+        ]):
+            print("OFFLINE")
+        else:
+            # Log để debug nhưng vẫn trả OFFLINE để bot không crash
+            print(f"ERROR [{err_type}]: {e}", file=sys.stderr)
+            print("OFFLINE")
 
 
 if __name__ == "__main__":
