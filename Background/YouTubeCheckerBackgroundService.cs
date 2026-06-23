@@ -106,6 +106,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             }
 
             var changed = false;
+            var stateChanged = false;
 
             foreach (var channelId in _config.YoutubeChannelIds)
             {
@@ -114,14 +115,23 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 var lastVideoId = _botState.LastVideoIds.GetValueOrDefault(channelId, string.Empty);
                 var videoIds = await _youtube.GetLatestVideoIdsAsync(channelId);
 
-                foreach (var videoId in videoIds)
+                // Tìm vị trí của lastVideoId trong danh sách (newest-first).
+                // -1 = lastVideoId cũ hơn tất cả top-5 (hoặc chưa có lastVideoId).
+                var hasReference = !string.IsNullOrEmpty(lastVideoId);
+                var lastKnownIndex = hasReference ? videoIds.IndexOf(lastVideoId) : -1;
+
+                // Chỉ gửi 1 video mới nhất mỗi channel khi startup
+                var sentNewOnStartup = false;
+
+                for (var i = 0; i < videoIds.Count; i++)
                 {
+                    var videoId = videoIds[i];
                     var currentStatus = _liveStates.GetValueOrDefault(videoId, "none");
 
                     // Đã có status rồi → không cần sync
                     if (currentStatus != "none") continue;
 
-                    // Là LastVideoId đã biết của channel này → đánh dấu terminal ngay
+                    // Là LastVideoId đã biết → đánh terminal
                     if (lastVideoId == videoId)
                     {
                         _liveStates[videoId] = "video_sent";
@@ -131,22 +141,37 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                         continue;
                     }
 
-                    // Video chưa biết → fetch để kiểm tra có đang live không
+                    // Video chưa biết → fetch để kiểm tra
                     var video = await _youtube.GetVideoByIdAsync(videoId);
                     if (video is null) continue;
 
                     if (video.LiveBroadcastContent == "live")
                     {
-                        // Gửi thông báo live và đánh dấu live_notified
+                        // Đang live thật → gửi thông báo live
                         await _discord.SendVideoNotificationAsync(video);
                         _liveStates[videoId] = "live_notified";
                         changed = true;
                         _logger.LogInformation(
                             "Startup sync [{Channel}]: active live — sent notification & marked live_notified — {VideoId}", channelId, videoId);
                     }
+                    else if (video.LiveBroadcastContent == "none"
+                             && hasReference
+                             && (lastKnownIndex == -1 || i < lastKnownIndex)
+                             && !sentNewOnStartup)
+                    {
+                        // Video MỚI hơn lastVideoId, upload trong lúc bot offline → thông báo
+                        await _discord.SendVideoNotificationAsync(video);
+                        _botState.LastVideoIds[channelId] = videoId;
+                        _liveStates[videoId] = "video_sent";
+                        changed = true;
+                        stateChanged = true;
+                        sentNewOnStartup = true;
+                        _logger.LogInformation(
+                            "Startup sync [{Channel}]: new video uploaded while offline — sent notification — {VideoId}", channelId, videoId);
+                    }
                     else
                     {
-                        // Video cũ hoặc video không biết → đánh dấu terminal
+                        // Video cũ hoặc upcoming → đánh terminal, không thông báo
                         _liveStates[videoId] = "video_sent";
                         changed = true;
                         _logger.LogInformation(
@@ -158,7 +183,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             if (changed)
                 await _liveState.SaveAsync(_liveStates);
 
-            // Lưu state (có thể đã migrate)
+            // Lưu state (migrate hoặc update lastVideoId trên startup)
             await _persistence.SaveStateAsync(_botState);
         }
         catch (Exception ex)
