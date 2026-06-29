@@ -41,8 +41,10 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
     {
         await DeferAsync(ephemeral: true);
 
-        // ── Rate limit (thread-safe) ──────────────────────────────────────────
-        var cooldownMessage = GetCooldownMessage();
+        // ── Rate limit (atomic check-and-set) ────────────────────────────────
+        // FIX: check + set trong cùng 1 lock → tránh TOCTOU race (2 request đồng thời
+        // cùng pass check trước khi cái nào kịp set _lastRefreshUtc).
+        var cooldownMessage = TryAcquireOrGetCooldownMessage();
         if (cooldownMessage is not null)
         {
             await FollowupAsync(cooldownMessage, ephemeral: true);
@@ -52,14 +54,13 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
         // ── Channel guard ─────────────────────────────────────────────────────
         if (_discord.Client.GetChannel(_config.ShopChannelId) is not IMessageChannel)
         {
+            lock (_refreshLock) { _lastRefreshUtc = DateTime.MinValue; } // release cooldown
             await FollowupAsync("❌ Không tìm thấy shop channel!", ephemeral: true);
             return;
         }
 
         try
         {
-            lock (_refreshLock) { _lastRefreshUtc = DateTime.UtcNow; }
-
             await _shopBackground.RefreshShopAsync();
             await FollowupAsync("✅ Shop đã được cập nhật!", ephemeral: true);
         }
@@ -77,13 +78,20 @@ public class ShopCommandModule : InteractionModuleBase<SocketInteractionContext>
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    /// <returns>Thông báo cooldown nếu còn hiệu lực, null nếu được phép chạy.</returns>
-    private static string? GetCooldownMessage()
+    /// <summary>
+    /// Atomic check-and-set: nếu hết cooldown thì set _lastRefreshUtc ngay trong lock
+    /// và trả null (cho phép chạy). Nếu còn cooldown trả về thông báo chờ.
+    /// </summary>
+    private static string? TryAcquireOrGetCooldownMessage()
     {
         lock (_refreshLock)
         {
             var elapsed = DateTime.UtcNow - _lastRefreshUtc;
-            if (elapsed >= RefreshCooldown) return null;
+            if (elapsed >= RefreshCooldown)
+            {
+                _lastRefreshUtc = DateTime.UtcNow; // set ngay trong lock
+                return null;
+            }
             var remaining = (int)(RefreshCooldown - elapsed).TotalSeconds + 1;
             return $"⏳ Vui lòng chờ thêm **{remaining}s** trước khi refresh lại.";
         }

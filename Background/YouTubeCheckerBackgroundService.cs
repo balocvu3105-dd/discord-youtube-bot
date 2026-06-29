@@ -92,6 +92,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             _liveStates = await _liveState.LoadAsync();
 
             // Migrate legacy LastVideoId (single channel) → LastVideoIds (multi-channel)
+            var botStateChanged = false;
             if (!string.IsNullOrEmpty(_botState.LastVideoId) && _botState.LastVideoIds.Count == 0)
             {
                 var firstChannel = _config.YoutubeChannelIds.FirstOrDefault();
@@ -103,10 +104,10 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                         _botState.LastVideoId, firstChannel);
                 }
                 _botState.LastVideoId = string.Empty;
+                botStateChanged = true; // migration cần được lưu xuống disk
             }
 
-            var changed = false;
-            var stateChanged = false;
+            var changed = false; // liveStates thay đổi
 
             foreach (var channelId in _config.YoutubeChannelIds)
             {
@@ -164,7 +165,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                         _botState.LastVideoIds[channelId] = videoId;
                         _liveStates[videoId] = "video_sent";
                         changed = true;
-                        stateChanged = true;
+                        botStateChanged = true;
                         sentNewOnStartup = true;
                         _logger.LogInformation(
                             "Startup sync [{Channel}]: new video uploaded while offline — sent notification — {VideoId}", channelId, videoId);
@@ -183,8 +184,9 @@ public class YouTubeCheckerBackgroundService : BackgroundService
             if (changed)
                 await _liveState.SaveAsync(_liveStates);
 
-            // Lưu state (migrate hoặc update lastVideoId trên startup)
-            await _persistence.SaveStateAsync(_botState);
+            // Chỉ lưu botState khi có migrate legacy hoặc có lastVideoId mới được ghi
+            if (botStateChanged)
+                await _persistence.SaveStateAsync(_botState);
         }
         catch (Exception ex)
         {

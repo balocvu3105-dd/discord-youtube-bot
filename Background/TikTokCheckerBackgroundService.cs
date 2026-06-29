@@ -194,7 +194,11 @@ public class TikTokCheckerBackgroundService : BackgroundService
 
             var json = System.Text.Json.JsonSerializer.Serialize(_liveNotified,
                 new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(path, json);
+
+            // Atomic write: ghi vào temp rồi rename — tránh corrupt JSON nếu process crash giữa chừng
+            var tempPath = path + ".tmp";
+            await File.WriteAllTextAsync(tempPath, json);
+            File.Move(tempPath, path, overwrite: true);
         }
         catch (Exception ex)
         {

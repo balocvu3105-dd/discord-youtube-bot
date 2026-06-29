@@ -16,6 +16,9 @@ public class ShopBackgroundService : BackgroundService
     private readonly IShopMessagePersistenceService _persistence;
     private readonly ILogger<ShopBackgroundService> _logger;
 
+    // Mutex: ngăn timer và /refreshshop chạy đồng thời → tránh duplicate message
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
+
     // Chạy đúng 2 thời điểm cố định mỗi ngày (giờ Việt Nam UTC+7)
     private static readonly TimeSpan[] RefreshTimes =
     [
@@ -80,6 +83,19 @@ public class ShopBackgroundService : BackgroundService
     // ── Public: dùng được từ ShopCommandModule ───────────────────────────────
 
     public async Task RefreshShopAsync(CancellationToken ct = default)
+    {
+        await _refreshLock.WaitAsync(ct);
+        try
+        {
+            await RefreshShopCoreAsync(ct);
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+    }
+
+    private async Task RefreshShopCoreAsync(CancellationToken ct)
     {
         _logger.LogInformation("Refreshing shop messages...");
 

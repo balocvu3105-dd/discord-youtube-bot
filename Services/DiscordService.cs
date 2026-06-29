@@ -17,7 +17,18 @@ public class DiscordService : IDiscordService
     // TaskCompletionSource để các service khác có thể await cho đến khi
     // Discord thực sự ready (Client.Ready event fired)
     private readonly TaskCompletionSource<bool> _readyTcs = new();
-    public Task WaitForReadyAsync() => _readyTcs.Task;
+
+    /// <summary>
+    /// Chờ đến khi Discord Ready. Nếu sau 60s vẫn chưa ready → throw TimeoutException
+    /// để tránh background services treo vĩnh viễn khi Discord connection thất bại.
+    /// </summary>
+    public async Task WaitForReadyAsync()
+    {
+        var timeout = Task.Delay(TimeSpan.FromSeconds(60));
+        var completed = await Task.WhenAny(_readyTcs.Task, timeout);
+        if (completed == timeout)
+            throw new TimeoutException("Discord Ready event không nhận được sau 60s — kiểm tra token và kết nối mạng.");
+    }
 
     public DiscordSocketClient Client => _client;
 

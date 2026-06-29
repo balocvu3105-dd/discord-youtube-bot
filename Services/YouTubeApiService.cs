@@ -26,7 +26,8 @@ public class YouTubeApiService : IYouTubeApiService
     private readonly ILogger<YouTubeApiService> _logger;
 
     // FIX BUG #2: Cache playlistId per channel — chỉ fetch 1 lần duy nhất per channel.
-    private readonly Dictionary<string, string> _cachedPlaylistIds = new();
+    // ConcurrentDictionary để an toàn nếu sau này check nhiều channel song song.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _cachedPlaylistIds = new();
 
     public YouTubeApiService(
         IOptions<BotConfiguration> config,

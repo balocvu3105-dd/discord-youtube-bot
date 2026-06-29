@@ -47,16 +47,17 @@ async def _check(username: str):
         err_type = type(e).__name__
         err_msg = str(e).lower()
 
-        # Phân loại lỗi thường gặp
+        # Lỗi xác định user offline thật → OFFLINE
         if any(kw in err_msg for kw in [
             "user_not_found", "not found", "not capable",
             "offline", "not live", "not broadcasting"
         ]):
             print("OFFLINE")
         else:
-            # Log để debug nhưng vẫn trả OFFLINE để bot không crash
+            # Lỗi mạng / timeout / unknown → exit(1) để C# coi là lỗi tạm thời,
+            # KHÔNG reset live state, tránh double notification.
             print(f"ERROR [{err_type}]: {e}", file=sys.stderr)
-            print("OFFLINE")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

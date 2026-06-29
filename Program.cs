@@ -169,14 +169,31 @@ try
 
     discordClient.Ready += async () =>
     {
-        await interactionService.RegisterCommandsGloballyAsync();
-        Log.Information("Slash commands registered globally");
+        try
+        {
+            await interactionService.RegisterCommandsGloballyAsync();
+            Log.Information("Slash commands registered globally");
+        }
+        catch (Exception ex)
+        {
+            // Exception trong async event handler bị swallowed bởi Discord.Net.
+            // Log thủ công để không mất trace khi lệnh slash không đăng ký được.
+            Log.Error(ex, "RegisterCommandsGloballyAsync thất bại");
+        }
     };
 
     discordClient.InteractionCreated += async interaction =>
     {
-        var ctx = new SocketInteractionContext(discordClient, interaction);
-        await interactionService.ExecuteCommandAsync(ctx, app.Services);
+        try
+        {
+            var ctx = new SocketInteractionContext(discordClient, interaction);
+            await interactionService.ExecuteCommandAsync(ctx, app.Services);
+        }
+        catch (Exception ex)
+        {
+            // Exception trong async event handler bị swallowed — log để không mất trace.
+            Log.Error(ex, "InteractionCreated handler thất bại");
+        }
     };
 
     var discordService = app.Services.GetRequiredService<DiscordService>();

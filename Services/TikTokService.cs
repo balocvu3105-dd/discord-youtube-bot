@@ -82,10 +82,25 @@ public class TikTokService : ITikTokService
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
         var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
 
-        await process.WaitForExitAsync(cts.Token);
+        try
+        {
+            await process.WaitForExitAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Timeout: kill process để tránh zombie, rồi rethrow
+            try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
+            throw;
+        }
 
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
+
+        // Exit code != 0 → lỗi mạng/timeout từ script, ném exception
+        // để caller bỏ qua lần check này và KHÔNG reset live state.
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(
+                $"tiktok_check.py exited with code {process.ExitCode}: {stderr.Trim()}");
 
         return (stdout, stderr);
     }

@@ -25,7 +25,7 @@ public class LdShopScraperService
     // Thread-safe lazy cache: chỉ fetch allCommodity 1 lần, dù nhiều coroutine gọi đồng thời.
     // SemaphoreSlim bảo vệ phần populate.
     private readonly SemaphoreSlim _nameCacheLock = new(1, 1);
-    private Dictionary<string, string>? _nameCache;
+    private volatile Dictionary<string, string>? _nameCache;
 
     public LdShopScraperService(
         IHttpClientFactory httpClientFactory,
