@@ -181,6 +181,20 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 }
             }
 
+            // ✅ FIX DOUBLE NOTIFY: Sau khi xử lý top-5, đánh terminal cho tất cả video
+            // còn status "none" trong _liveStates — đây là video cũ không còn trong top-5.
+            // Nếu không làm bước này, video cũ có thể quay lại top-5 và bị coi là "video mới".
+            foreach (var videoId in _liveStates.Keys.ToList())
+            {
+                if (_liveStates[videoId] == "none")
+                {
+                    _liveStates[videoId] = "video_sent";
+                    changed = true;
+                    _logger.LogInformation(
+                        "Startup cleanup: stale 'none' → video_sent — {VideoId}", videoId);
+                }
+            }
+
             if (changed)
                 await _liveState.SaveAsync(_liveStates);
 
@@ -274,9 +288,11 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                             "Live ended (was {Status}) → video_sent, no re-notify [{Channel}] — {VideoId}",
                             currentStatus, channelId, videoId);
                     }
-                    else if (lastVideoId != videoId)
+                    else if (lastVideoId != videoId && !_liveStates.ContainsKey(videoId))
                     {
-                        // Video upload thường thật sự mới → gửi thông báo
+                        // ✅ FIX: Chỉ gửi thông báo khi video CHƯA TỪNG XUẤT HIỆN trong _liveStates.
+                        // Guard "!_liveStates.ContainsKey(videoId)" ngăn việc gửi lại cho video
+                        // đã biết dù status là "none" (video cũ bị bỏ sót trong cleanup).
                         await _discord.SendVideoNotificationAsync(video);
                         _botState.LastVideoIds[channelId] = videoId;
                         stateChanged = true;
@@ -284,6 +300,14 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                         liveChanged = true;
                         _logger.LogInformation("VIDEO notification sent [{Channel}] — {VideoId}", channelId, videoId);
                         break; // Chỉ 1 video mới nhất mỗi channel mỗi lần check
+                    }
+                    else if (lastVideoId != videoId && _liveStates.GetValueOrDefault(videoId) == "none")
+                    {
+                        // Video đã biết (có trong _liveStates) nhưng status là "none" — đánh terminal
+                        // để tránh xử lý lại trong các tick tiếp theo.
+                        _liveStates[videoId] = "video_sent";
+                        liveChanged = true;
+                        _logger.LogDebug("Mark stale 'none' → video_sent in check loop — {VideoId}", videoId);
                     }
                     else
                     {

@@ -18,6 +18,12 @@ public class DiscordService : IDiscordService
     // Discord thực sự ready (Client.Ready event fired)
     private readonly TaskCompletionSource<bool> _readyTcs = new();
 
+    // Circuit breaker: đếm số lần 401 liên tiếp.
+    // 401 = token invalid/revoked → không retry vô hạn.
+    // Sau 3 lần → exit process để Docker restart (tránh crash loop).
+    private int _consecutiveAuthFailures = 0;
+    private const int MaxAuthFailures = 3;
+
     /// <summary>
     /// Chờ đến khi Discord Ready. Nếu sau 60s vẫn chưa ready → throw TimeoutException
     /// để tránh background services treo vĩnh viễn khi Discord connection thất bại.
@@ -52,7 +58,21 @@ public class DiscordService : IDiscordService
     {
         _logger.LogInformation("Đang kết nối Discord...");
 
-        await _client.LoginAsync(TokenType.Bot, _config.DiscordToken);
+        try
+        {
+            await _client.LoginAsync(TokenType.Bot, _config.DiscordToken);
+        }
+        catch (Discord.Net.HttpException ex) when (ex.HttpCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            // 401 ngay tại LoginAsync → token sai hoàn toàn, không cần retry.
+            _logger.LogCritical(
+                "Discord LoginAsync thất bại: 401 Unauthorized — token không hợp lệ. " +
+                "Kiểm tra DISCORD_TOKEN trong .env rồi restart thủ công.");
+            Serilog.Log.CloseAndFlush();
+            Environment.Exit(1);
+            return; // Unreachable, nhưng cần để compiler không cảnh báo
+        }
+
         await _client.StartAsync();
 
         // Chờ tối đa 30 giây cho Ready event
@@ -62,6 +82,7 @@ public class DiscordService : IDiscordService
 
         if (completed == timeout)
             _logger.LogWarning("Discord Ready event chưa nhận được sau 30s");
+
     }
 
     // ── Notifications ────────────────────────────────────────────────────────
@@ -138,6 +159,7 @@ public class DiscordService : IDiscordService
     private async Task OnReadyAsync()
     {
         _readyTcs.TrySetResult(true);
+        _consecutiveAuthFailures = 0; // Reset circuit breaker khi kết nối thành công
         _logger.LogInformation(
             "Discord Ready — logged in as {Username}#{Discriminator}",
             _client.CurrentUser.Username,
@@ -179,6 +201,28 @@ public class DiscordService : IDiscordService
 
     private Task OnDisconnectedAsync(Exception? ex)
     {
+        // ✅ Circuit breaker: nếu Discord trả về 401 liên tiếp → token invalid.
+        // Không retry vô hạn — exit để Docker restart với token đúng.
+        if (ex is Discord.Net.HttpException { HttpCode: System.Net.HttpStatusCode.Unauthorized })
+        {
+            _consecutiveAuthFailures++;
+            _logger.LogWarning(
+                "Discord 401 Unauthorized (lần {Count}/{Max}) — token có thể không hợp lệ",
+                _consecutiveAuthFailures, MaxAuthFailures);
+
+            if (_consecutiveAuthFailures >= MaxAuthFailures)
+            {
+                _logger.LogCritical(
+                    "Discord 401 Unauthorized {Max} lần liên tiếp — token không hợp lệ, dừng bot. " +
+                    "Kiểm tra DISCORD_TOKEN trong .env rồi restart thủ công.",
+                    MaxAuthFailures);
+                // Flush log trước khi exit
+                Serilog.Log.CloseAndFlush();
+                Environment.Exit(1);
+            }
+            return Task.CompletedTask;
+        }
+
         // ✅ FIX: Phân biệt loại disconnect để tránh log noise.
         //
         // TaskCanceledException / OperationCanceledException:

@@ -1,8 +1,28 @@
 services:
   bot:
     build: .
+
+    # unless-stopped: restart khi crash, KHÔNG restart khi `docker compose stop` thủ công.
+    # Điều này tránh restart vòng lặp sau khi dừng bot chủ động để update token.
     restart: unless-stopped
+
     env_file: .env
+
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+
+    # Cho phép bot flush log và lưu state JSON trước khi container bị kill.
+    # Default là 10s — tăng lên 15s vì có nhiều background services cần shutdown clean.
+    stop_grace_period: 15s
+
+    # Giới hạn tốc độ restart để tránh crash loop (ví dụ: token sai, DI error).
+    # Sau mỗi lần crash, Docker chờ 15s trước khi khởi động lại.
+    # Circuit breaker trong DiscordService sẽ exit(1) sau 3 lần 401 liên tiếp,
+    # kết hợp với restart_policy này → tránh spam restart khi token không hợp lệ.
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 15s
+        max_attempts: 10
+        window: 60s

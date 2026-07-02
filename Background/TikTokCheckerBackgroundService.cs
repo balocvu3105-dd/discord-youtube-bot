@@ -55,6 +55,12 @@ public class TikTokCheckerBackgroundService : BackgroundService
         // Load state từ file nếu có
         await LoadStateAsync();
 
+        // ✅ FIX DOUBLE NOTIFY: Sau khi load state, đồng bộ với TikTok API.
+        // Nếu state file bị mất/corrupt mà user đang live → state = false
+        // → tick đầu tiên sẽ gửi thông báo lại.
+        // SyncStateOnStartupAsync phát hiện live → set state=true (không gửi) → tránh duplicate.
+        await SyncStateOnStartupAsync();
+
         _logger.LogInformation("Discord ready — TikTokCheckerBackgroundService running");
 
         while (!stoppingToken.IsCancellationRequested)
@@ -79,6 +85,55 @@ public class TikTokCheckerBackgroundService : BackgroundService
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Kiểm tra TikTok API ngay khi startup — nếu user đang live mà state = false
+    /// (do file bị mất/corrupt hoặc bot restart giữa live), cập nhật state = true mà KHÔNG gửi thông báo.
+    /// Tránh double notification khi bot restart trong lúc user đang live.
+    /// </summary>
+    private async Task SyncStateOnStartupAsync()
+    {
+        var changed = false;
+        foreach (var username in _config.TikTokUsernames)
+        {
+            if (string.IsNullOrWhiteSpace(username)) continue;
+            try
+            {
+                var isLive = await _tiktok.IsLiveAsync(username);
+                if (isLive && !_liveNotified.GetValueOrDefault(username, false))
+                {
+                    // Đang live nhưng state chưa được đánh dấu → đánh dấu không gửi thông báo.
+                    // Bot đã gửi thông báo trước khi restart (hoặc user live mà bot vừa khởi động).
+                    // Không gửi lại — chỉ đồng bộ state.
+                    _liveNotified[username] = true;
+                    changed = true;
+                    _logger.LogInformation(
+                        "Startup sync: @{Username} đang live — set state=true, không gửi thông báo", username);
+                }
+                else if (!isLive && _liveNotified.GetValueOrDefault(username, false))
+                {
+                    // State = true nhưng không còn live → reset để tránh bỏ sót live kế tiếp.
+                    _liveNotified[username] = false;
+                    changed = true;
+                    _logger.LogInformation(
+                        "Startup sync: @{Username} không live — reset state=false", username);
+                }
+                else
+                {
+                    _logger.LogDebug(
+                        "Startup sync: @{Username} — isLive={IsLive}, state OK", username, isLive);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Lỗi check TikTok khi startup → giữ nguyên state hiện tại, tiếp tục chạy.
+                _logger.LogWarning(ex, "Startup sync TikTok thất bại cho @{Username} — giữ state cũ", username);
+            }
+        }
+
+        if (changed)
+            await SaveStateAsync();
     }
 
     private async Task CheckTikTokAsync(CancellationToken ct)

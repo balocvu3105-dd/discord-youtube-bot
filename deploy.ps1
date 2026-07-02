@@ -11,14 +11,23 @@ $PROJECT_DIR = "/root/bot/discord-youtube-bot"
 # ────────────────────────────────────────────────────────────
 
 $REPO = "D:\source code\YouTubeDiscordBot"
-$COMMIT_MSG = "fix: switch TikTok live check to Python TikTokLive library
+$COMMIT_MSG = "fix: double notify + 401 circuit breaker + TikTok startup sync
 
-- Thay webcast API (bi 10011 do het cookie) bang Python subprocess
-- TikTokService.cs: goi tiktok_check.py thay vi HTTP truc tiep
-- tiktok_check.py: dung TikTokLive library, tu quan ly session/auth
-- Dockerfile: them Python 3 + pip install TikTokLive
-- BotConfiguration: bo TikTokMsToken/TikTokCookies, them TikTokScriptPath
-- Program.cs: doi AddHttpClient sang AddSingleton cho TikTokService"
+YouTube:
+- YouTubeCheckerBackgroundService: cleanup stale 'none' entries on startup
+- YouTubeCheckerBackgroundService: guard ContainsKey() truoc khi gui thong bao
+  (chi gui cho video chua tung xuat hien trong _liveStates)
+
+TikTok:
+- TikTokCheckerBackgroundService: them SyncStateOnStartupAsync
+  (neu dang live ma state=false -> set true khong gui, tranh double notify khi restart)
+
+Discord / Infra:
+- DiscordService: circuit breaker 401 Unauthorized
+  (ConnectAsync bat 401 ngay tai LoginAsync -> exit(1))
+  (OnDisconnectedAsync dem 3 lan 401 lien tiep -> LogCritical + exit(1))
+  (OnReadyAsync reset counter khi ket noi thanh cong)
+- docker-compose.yml: them stop_grace_period=15s va restart_policy delay=15s"
 
 Set-Location $REPO
 
