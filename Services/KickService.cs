@@ -23,7 +23,8 @@ public class KickService : IStreamPlatformProvider
     public async Task<StreamStatusResult> CheckLiveStatusAsync(string usernameOrId, CancellationToken ct = default)
     {
         var slug = usernameOrId.Trim().ToLowerInvariant();
-        var url = $"https://kick.com/api/v2/channels/{slug}";
+        var safeSlug = Uri.EscapeDataString(slug);
+        var url = $"https://kick.com/api/v2/channels/{safeSlug}";
 
         try
         {
@@ -60,7 +61,7 @@ public class KickService : IStreamPlatformProvider
                 Platform = PlatformName,
                 UsernameOrId = slug,
                 Title = !string.IsNullOrWhiteSpace(live.SessionTitle) ? live.SessionTitle : $"🔴 {slug} đang livestream trên Kick!",
-                StreamUrl = $"https://kick.com/{slug}",
+                StreamUrl = $"https://kick.com/{safeSlug}",
                 ThumbnailUrl = live.Thumbnail?.Url ?? string.Empty,
                 StreamId = live.Id.ToString(),
                 ViewerCount = live.Viewers,

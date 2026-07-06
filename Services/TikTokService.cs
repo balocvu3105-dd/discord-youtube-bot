@@ -53,18 +53,18 @@ public class TikTokService : ITikTokService
         // Thử python3 trước (Linux/Docker), fallback sang python (Windows)
         var pythonExecutable = await FindPythonAsync();
 
-        using var process = new Process
+        var startInfo = new ProcessStartInfo
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = pythonExecutable,
-                Arguments = $"\"{ScriptPath}\" \"{username}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            }
+            FileName = pythonExecutable,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
         };
+        startInfo.ArgumentList.Add(ScriptPath);
+        startInfo.ArgumentList.Add(username);
+
+        using var process = new Process { StartInfo = startInfo };
 
         process.Start();
 

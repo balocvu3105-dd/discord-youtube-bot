@@ -28,7 +28,8 @@ public class FacebookLiveService : IStreamPlatformProvider
             username = username.Substring(username.IndexOf("facebook.com/") + 13).Trim('/');
         }
 
-        var url = $"https://www.facebook.com/{username}/live/";
+        var safeUsername = Uri.EscapeDataString(username);
+        var url = $"https://www.facebook.com/{safeUsername}/live/";
 
         try
         {

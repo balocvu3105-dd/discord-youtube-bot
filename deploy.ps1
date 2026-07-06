@@ -5,27 +5,21 @@
 # ============================================================
 
 # ── Cấu hình VPS ────────────────────────────────────────────
-$VPS_USER    = "root"
-$VPS_IP      = "103.77.243.86"
-$PROJECT_DIR = "/root/bot/discord-youtube-bot"
+# Cho phép override từ biến môi trường (ví dụ: $env:VPS_IP) để tránh hardcode IP khi public repo
+$VPS_USER    = if ($env:VPS_USER) { $env:VPS_USER } else { "root" }
+$VPS_IP      = if ($env:VPS_IP) { $env:VPS_IP } else { "103.77.243.86" }
 # ────────────────────────────────────────────────────────────
 
 $REPO = "D:\source code\YouTubeDiscordBot"
-$COMMIT_MSG = "feat: implement multi-platform livestream tracking (Twitch, Kick, FB) and patch 5 edge-case bugs
+$COMMIT_MSG = @'
+chore: security hardening across livestream services and deployment script
 
-Multi-Platform Expansion:
-- Add IStreamPlatformProvider plugin architecture.
-- Add TwitchService (GraphQL endpoint), KickService (Public API v2), FacebookLiveService.
-- Add StreamerManagerService (atomic JSON store for dynamic streamer list).
-- Add UnifiedStreamCheckerBackgroundService with startup sync to prevent duplicate notifications.
-- Add /live slash command group (status, add, remove, check).
-
-Bug Fixes & Hardening:
-- Program.cs: add Chrome User-Agent and Accept headers to prevent Cloudflare/WAF 403 Forbidden.
-- TwitchService: check GraphQL errors array to prevent false offline -> duplicate notifications.
-- TwitchService & KickService: use string? with DateTime.TryParse for created_at to prevent JsonException crash.
-- FacebookLiveService: detect login walls/checkpoints and throw exception instead of false offline.
-- UnifiedStreamCheckerBackgroundService: refine notification logic to eliminate double notify on API caching glitch."
+Security Hardening & Optimization:
+- TikTokService: use ProcessStartInfo.ArgumentList instead of string concatenation to prevent Argument Injection.
+- KickService & FacebookLiveService: apply Uri.EscapeDataString to slugs/usernames to prevent Path Traversal and URL parsing errors.
+- deploy.ps1: support environment variable overrides ($env:VPS_USER, $env:VPS_IP) to avoid hardcoding server details.
+- README.md: document multi-platform livestream tracking features and security defensive coding practices.
+'@
 
 Set-Location $REPO
 
@@ -57,8 +51,8 @@ Write-Host "`n[5/5] Deploy len VPS..." -ForegroundColor Cyan
 
 # Update appsettings.json tren VPS (them TanCataww channel ID neu chua co)
 # Sau do git pull va rebuild Docker
-$VPS_COMMANDS = @"
-cd $PROJECT_DIR
+$VPS_COMMANDS = @'
+cd /root/bot/discord-youtube-bot
 
 # Them TikTok config vao appsettings.json neu chua co
 if ! grep -q 'TikTokUsernames' appsettings.json 2>/dev/null; then
@@ -81,7 +75,7 @@ else
 fi
 
 git stash && git pull origin main && docker compose up --build -d && echo '=== Deploy OK ==='
-"@
+'@
 
 ssh "${VPS_USER}@${VPS_IP}" $VPS_COMMANDS
 

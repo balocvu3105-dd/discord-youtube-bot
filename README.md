@@ -28,7 +28,8 @@ The bot continuously monitors YouTube channels, tracks livestream status, aggreg
 
 * Built with .NET 8 and C#
 * Deployed on Ubuntu VPS using Docker
-* Supports multiple YouTube channels
+* Multi-platform livestream tracking (YouTube, Twitch, Kick, Facebook, TikTok)
+* Security-hardened (Argument injection & Path traversal defense)
 * Integrates external APIs
 * Multi-provider architecture
 * Background scheduled services
@@ -41,21 +42,20 @@ The bot continuously monitors YouTube channels, tracks livestream status, aggreg
 
 # 🛠 Core Features
 
-## YouTube Monitoring
+## Multi-Platform Livestream Tracking & YouTube Monitoring
 
-Automatically monitors multiple YouTube channels and detects:
+Automatically monitors multiple platforms and channels, detecting:
 
-* New video uploads
-* Livestream starts
-* Livestream ends
+* New video uploads (YouTube)
+* Livestream starts/ends across **YouTube, Twitch, Kick, Facebook, and TikTok**
 
 Features:
 
-* Multi-channel support
-* Role mentions
-* Rich Discord embeds
-* Duplicate notification prevention
-* Restart-safe state recovery
+* Multi-platform & Multi-channel support
+* Dynamic streamer management via `/live` slash commands (`add`, `remove`, `status`, `check`)
+* Role mentions & Rich Discord embeds
+* Duplicate notification prevention & restart-safe state recovery
+* Security hardened against Argument Injection and Path Traversal
 
 ---
 
@@ -275,6 +275,20 @@ Shop updates must occur at fixed times every day.
 ### Solution
 
 Implemented timezone-aware scheduling using BackgroundService and Vietnam Standard Time calculations.
+
+---
+
+## Security Hardening & Defensive Coding
+
+### Problem
+
+Integrating external Python subprocesses (TikTokLive) and user-supplied streamer usernames/slugs creates potential attack vectors such as Argument Injection and URL Path Traversal.
+
+### Solution
+
+* Replaced string concatenation in subprocess execution with .NET Core's `ProcessStartInfo.ArgumentList` to guarantee OS-level argument escaping.
+* Implemented strict URI encoding (`Uri.EscapeDataString`) when constructing external API requests and stream URLs.
+* Refactored deployment automation (`deploy.ps1`) to support environment variable overrides (`$env:VPS_IP`, `$env:VPS_USER`), preventing sensitive server IP disclosure in public repositories.
 
 ---
 
