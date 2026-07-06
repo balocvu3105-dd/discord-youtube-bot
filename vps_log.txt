@@ -1,0 +1,38 @@
+NAME                        IMAGE                     COMMAND                  SERVICE   CREATED              STATUS              PORTS
+discord-youtube-bot-bot-1   discord-youtube-bot-bot   "dotnet YouTubeDisco…"   bot       About a minute ago   Up About a minute   
+=== LOG ===
+bot-1  | [11:16:43 INF]  — ═══════════════════════════════════════
+bot-1  | [11:16:43 INF]  — YouTubeDiscordBot starting...
+bot-1  | [11:16:43 INF]  — ═══════════════════════════════════════
+bot-1  | [11:16:43 INF] YouTubeDiscordBot.Services.DiscordService — Đang kết nối Discord...
+bot-1  | [11:16:43 INF] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] Discord.Net v3.19.1 (API v10)
+bot-1  | [11:16:43 INF] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] Connecting
+bot-1  | [11:16:45 INF] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] Connected
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Services.YouTubeApiService — YouTube API Key prefix: AIzaSyBL...
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Services.YouTubeApiService — YouTubeApiService initialized
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — YouTubeCheckerBackgroundService starting — Interval=120s
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Background.TikTokCheckerBackgroundService — TikTokCheckerBackgroundService — ExecuteAsync started
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Background.TikTokCheckerBackgroundService — TikTokCheckerBackgroundService starting — 1 user(s), Interval=60s
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Background.TikTokCheckerBackgroundService — Discord ready — TikTokCheckerBackgroundService running
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Services.TikTokService — TikTok @catawuwa — chạy tiktok_check.py...
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Background.ShopBackgroundService — ShopBackgroundService starting — refresh lúc 00:00 và 12:00 (giờ VN)
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Services.PersistenceService — State loaded — LastVideoId: By_e8NWmaB0
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Background.ShopBackgroundService — Discord ready — ShopBackgroundService running
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Services.LiveStateService — Live state loaded — 24 entries
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — Migrated legacy LastVideoId=By_e8NWmaB0 → LastVideoIds[UCHfFNHHKK6phqWfordByyEQ]
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Background.ShopBackgroundService — Shop refresh tiếp theo lúc 00:00 24/06/2026 (giờ VN) — chờ 05:43
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Services.YouTubeApiService — Fetching playlistId for channel UCHfFNHHKK6phqWfordByyEQ (first time, will be cached)...
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Services.DiscordService — Discord Ready — logged in as Cartethyia#4931
+bot-1  | [11:16:46 INF] YouTubeDiscordBot.Services.YouTubeApiService — PlaylistId cached for UCHfFNHHKK6phqWfordByyEQ: UUHfFNHHKK6phqWfordByyEQ
+bot-1  | [11:16:47 INF] YouTubeDiscordBot.Services.DiscordService — Startup notification sent → StatusChannel 1514917747056705597
+bot-1  | [11:16:47 INF] YouTubeDiscordBot.Services.YouTubeApiService — Fetching playlistId for channel UCS8tTU195JRDUbuagiIwvgQ (first time, will be cached)...
+bot-1  | [11:16:47 INF] YouTubeDiscordBot.Services.YouTubeApiService — PlaylistId cached for UCS8tTU195JRDUbuagiIwvgQ: UUS8tTU195JRDUbuagiIwvgQ
+bot-1  | [11:16:47 INF]  — Slash commands registered globally
+bot-1  | [11:16:47 INF] YouTubeDiscordBot.Services.DiscordService — [Discord.Net] Ready
+bot-1  | [11:16:47 INF] YouTubeDiscordBot.Services.PersistenceService — State saved — LastVideoId: 
+bot-1  | [11:16:47 INF] YouTubeDiscordBot.Background.YouTubeCheckerBackgroundService — Discord ready — YouTubeCheckerBackgroundService running
+bot-1  | [11:16:48 INF] YouTubeDiscordBot.Services.TikTokService — TikTok @catawuwa — kết quả: OFFLINE
+bot-1  | 
+bot-1  | [11:17:48 INF] YouTubeDiscordBot.Services.TikTokService — TikTok @catawuwa — chạy tiktok_check.py...
+bot-1  | [11:17:50 INF] YouTubeDiscordBot.Services.TikTokService — TikTok @catawuwa — kết quả: OFFLINE
+bot-1  | 

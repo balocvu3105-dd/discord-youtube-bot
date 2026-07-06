@@ -11,23 +11,13 @@ $PROJECT_DIR = "/root/bot/discord-youtube-bot"
 # ────────────────────────────────────────────────────────────
 
 $REPO = "D:\source code\YouTubeDiscordBot"
-$COMMIT_MSG = "fix: double notify + 401 circuit breaker + TikTok startup sync
-
-YouTube:
-- YouTubeCheckerBackgroundService: cleanup stale 'none' entries on startup
-- YouTubeCheckerBackgroundService: guard ContainsKey() truoc khi gui thong bao
-  (chi gui cho video chua tung xuat hien trong _liveStates)
+$COMMIT_MSG = "fix: prevent TikTok duplicate live notifications by allowing temporary timeout exceptions to propagate
 
 TikTok:
-- TikTokCheckerBackgroundService: them SyncStateOnStartupAsync
-  (neu dang live ma state=false -> set true khong gui, tranh double notify khi restart)
-
-Discord / Infra:
-- DiscordService: circuit breaker 401 Unauthorized
-  (ConnectAsync bat 401 ngay tai LoginAsync -> exit(1))
-  (OnDisconnectedAsync dem 3 lan 401 lien tiep -> LogCritical + exit(1))
-  (OnReadyAsync reset counter khi ket noi thanh cong)
-- docker-compose.yml: them stop_grace_period=15s va restart_policy delay=15s"
+- TikTokService: remove try/catch swallowing in IsLiveAsync.
+  When TikTok API times out or network error occurs (exit code 1), let exception propagate
+  to TikTokCheckerBackgroundService (catch & continue) WITHOUT resetting _liveNotified
+  to false. This prevents bot from falsely assuming user offline and duplicate notifying."
 
 Set-Location $REPO
 

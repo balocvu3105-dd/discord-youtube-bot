@@ -34,24 +34,16 @@ public class TikTokService : ITikTokService
 
     public async Task<bool> IsLiveAsync(string username)
     {
-        try
-        {
-            _logger.LogInformation("TikTok @{Username} — chạy tiktok_check.py...", username);
+        _logger.LogInformation("TikTok @{Username} — chạy tiktok_check.py...", username);
 
-            var result = await RunPythonScriptAsync(username);
+        var result = await RunPythonScriptAsync(username);
 
-            _logger.LogInformation("TikTok @{Username} — kết quả: {Result}", username, result.Output);
+        _logger.LogInformation("TikTok @{Username} — kết quả: {Result}", username, result.Output);
 
-            if (!string.IsNullOrEmpty(result.Stderr))
-                _logger.LogWarning("TikTok @{Username} — stderr: {Stderr}", username, result.Stderr);
+        if (!string.IsNullOrEmpty(result.Stderr))
+            _logger.LogWarning("TikTok @{Username} — stderr: {Stderr}", username, result.Stderr);
 
-            return result.Output.Trim().Equals("LIVE", StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "TikTokService.IsLiveAsync thất bại cho @{Username}", username);
-            return false;
-        }
+        return result.Output.Trim().Equals("LIVE", StringComparison.OrdinalIgnoreCase);
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────
