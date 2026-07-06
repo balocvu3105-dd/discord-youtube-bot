@@ -11,13 +11,21 @@ $PROJECT_DIR = "/root/bot/discord-youtube-bot"
 # ────────────────────────────────────────────────────────────
 
 $REPO = "D:\source code\YouTubeDiscordBot"
-$COMMIT_MSG = "fix: prevent TikTok duplicate live notifications by allowing temporary timeout exceptions to propagate
+$COMMIT_MSG = "feat: implement multi-platform livestream tracking (Twitch, Kick, FB) and patch 5 edge-case bugs
 
-TikTok:
-- TikTokService: remove try/catch swallowing in IsLiveAsync.
-  When TikTok API times out or network error occurs (exit code 1), let exception propagate
-  to TikTokCheckerBackgroundService (catch & continue) WITHOUT resetting _liveNotified
-  to false. This prevents bot from falsely assuming user offline and duplicate notifying."
+Multi-Platform Expansion:
+- Add IStreamPlatformProvider plugin architecture.
+- Add TwitchService (GraphQL endpoint), KickService (Public API v2), FacebookLiveService.
+- Add StreamerManagerService (atomic JSON store for dynamic streamer list).
+- Add UnifiedStreamCheckerBackgroundService with startup sync to prevent duplicate notifications.
+- Add /live slash command group (status, add, remove, check).
+
+Bug Fixes & Hardening:
+- Program.cs: add Chrome User-Agent and Accept headers to prevent Cloudflare/WAF 403 Forbidden.
+- TwitchService: check GraphQL errors array to prevent false offline -> duplicate notifications.
+- TwitchService & KickService: use string? with DateTime.TryParse for created_at to prevent JsonException crash.
+- FacebookLiveService: detect login walls/checkpoints and throw exception instead of false offline.
+- UnifiedStreamCheckerBackgroundService: refine notification logic to eliminate double notify on API caching glitch."
 
 Set-Location $REPO
 

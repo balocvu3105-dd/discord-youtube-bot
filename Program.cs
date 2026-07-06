@@ -1,4 +1,4 @@
-﻿using Discord;
+using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
 
@@ -148,15 +148,60 @@ try
     // TikTokService dùng Python subprocess (tiktok_check.py) — không cần HttpClient
     builder.Services.AddSingleton<ITikTokService, TikTokService>();
 
+    // ── Multi-Platform Streamer Tracking (Twitch, Kick, FB...) ───────────
+    builder.Services.AddSingleton<StreamerManagerService>();
+
+    builder.Services.AddHttpClient(nameof(TwitchService))
+        .ConfigureHttpClient(client =>
+        {
+            client.DefaultRequestHeaders.Add("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
+            client.DefaultRequestHeaders.Add("Accept", "application/json, text/plain, */*");
+            client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+        })
+        .AddStandardResilienceHandler();
+
+    builder.Services.AddHttpClient(nameof(KickService))
+        .ConfigureHttpClient(client =>
+        {
+            client.DefaultRequestHeaders.Add("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
+            client.DefaultRequestHeaders.Add("Accept", "application/json, text/plain, */*");
+            client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+            client.DefaultRequestHeaders.Add("Origin", "https://kick.com");
+            client.DefaultRequestHeaders.Add("Referer", "https://kick.com/");
+        })
+        .AddStandardResilienceHandler();
+
+    builder.Services.AddHttpClient(nameof(FacebookLiveService))
+        .ConfigureHttpClient(client =>
+        {
+            client.DefaultRequestHeaders.Add("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
+            client.DefaultRequestHeaders.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
+            client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9,vi;q=0.8");
+            client.DefaultRequestHeaders.Add("sec-fetch-dest", "document");
+            client.DefaultRequestHeaders.Add("sec-fetch-mode", "navigate");
+            client.DefaultRequestHeaders.Add("sec-fetch-site", "none");
+        })
+        .AddStandardResilienceHandler();
+
+    builder.Services.AddSingleton<IStreamPlatformProvider, TwitchService>();
+    builder.Services.AddSingleton<IStreamPlatformProvider, KickService>();
+    builder.Services.AddSingleton<IStreamPlatformProvider, FacebookLiveService>();
+
     // ── Background Services ──────────────────────────────────────────────
     builder.Services.AddHostedService<YouTubeCheckerBackgroundService>();
     builder.Services.AddHostedService<TikTokCheckerBackgroundService>();
+    builder.Services.AddHostedService<UnifiedStreamCheckerBackgroundService>();
+
     // AddSingleton trước để có thể inject ShopBackgroundService vào ShopCommandModule
     builder.Services.AddSingleton<ShopBackgroundService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ShopBackgroundService>());
 
     // ── Command Modules ──────────────────────────────────────────────────
     builder.Services.AddTransient<ShopCommandModule>();
+    builder.Services.AddTransient<LiveManagementCommandModule>();
 
     var app = builder.Build();
 

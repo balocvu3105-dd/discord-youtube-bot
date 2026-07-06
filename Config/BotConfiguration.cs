@@ -99,4 +99,9 @@ public class BotConfiguration
     /// Để trống = dùng thư mục chạy bot (AppContext.BaseDirectory/tiktok_check.py).
     /// </summary>
     public string TikTokScriptPath { get; set; } = string.Empty;
+
+    // ── Multi-Platform Extensions (Twitch, Kick, Facebook...) ────────────
+    public List<string> TwitchUsernames { get; set; } = new();
+    public List<string> KickSlugs { get; set; } = new();
+    public List<string> FacebookPages { get; set; } = new();
 }
