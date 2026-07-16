@@ -129,8 +129,8 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                     var videoId = videoIds[i];
                     var currentStatus = _liveStates.GetValueOrDefault(videoId, "none");
 
-                    // Đã có status rồi → không cần sync
-                    if (currentStatus != "none") continue;
+                    // Đã có status terminal hoặc live_notified rồi → không cần sync lại
+                    if (currentStatus == "video_sent" || currentStatus.StartsWith("live_notified")) continue;
 
                     // Là LastVideoId đã biết → đánh terminal
                     if (lastVideoId == videoId)
@@ -142,7 +142,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                         continue;
                     }
 
-                    // Video chưa biết → fetch để kiểm tra
+                    // Video chưa biết hoặc đang là "upcoming"/"none" → fetch để kiểm tra
                     var video = await _youtube.GetVideoByIdAsync(videoId);
                     if (video is null) continue;
 
@@ -155,12 +155,20 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                         _logger.LogInformation(
                             "Startup sync [{Channel}]: active live — sent notification & marked live_notified — {VideoId}", channelId, videoId);
                     }
+                    else if (video.LiveBroadcastContent == "upcoming")
+                    {
+                        if (currentStatus != "upcoming")
+                        {
+                            _liveStates[videoId] = "upcoming";
+                            changed = true;
+                        }
+                    }
                     else if (video.LiveBroadcastContent == "none"
                              && hasReference
                              && (lastKnownIndex == -1 || i < lastKnownIndex)
                              && !sentNewOnStartup)
                     {
-                        // Video MỚI hơn lastVideoId, upload trong lúc bot offline → thông báo
+                        // Video MỚI hơn lastVideoId (hoặc từng là upcoming và nay đã xuất bản) lúc bot offline → thông báo
                         await _discord.SendVideoNotificationAsync(video);
                         _botState.LastVideoIds[channelId] = videoId;
                         _liveStates[videoId] = "video_sent";
@@ -172,7 +180,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                     }
                     else
                     {
-                        // Video cũ hoặc upcoming → đánh terminal, không thông báo
+                        // Video cũ → đánh terminal, không thông báo
                         _liveStates[videoId] = "video_sent";
                         changed = true;
                         _logger.LogInformation(
@@ -181,7 +189,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 }
             }
 
-            // ✅ FIX DOUBLE NOTIFY: Sau khi xử lý top-5, đánh terminal cho tất cả video
+            // ✅ FIX DOUBLE NOTIFY & STALE CACHE: Sau khi xử lý top-5, đánh terminal cho tất cả video
             // còn status "none" trong _liveStates — đây là video cũ không còn trong top-5.
             // Nếu không làm bước này, video cũ có thể quay lại top-5 và bị coi là "video mới".
             foreach (var videoId in _liveStates.Keys.ToList())
@@ -238,7 +246,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 }
 
                 // Skip LastVideoId không có live state (video cũ trước khi có liveStates)
-                if (lastVideoId == videoId && currentStatus == "none")
+                if (lastVideoId == videoId && (currentStatus == "none" || currentStatus == "upcoming"))
                 {
                     _liveStates[videoId] = "video_sent";
                     liveChanged = true;
@@ -265,7 +273,7 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 }
                 else if (video.LiveBroadcastContent == "upcoming")
                 {
-                    if (currentStatus == "none")
+                    if (currentStatus != "upcoming")
                     {
                         _liveStates[videoId] = "upcoming";
                         liveChanged = true;
@@ -275,39 +283,36 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                 else
                 {
                     // LiveBroadcastContent = "none":
-                    // Có thể là (A) video upload thường mới, hoặc (B) livestream vừa kết thúc.
-                    var wasLive = currentStatus.StartsWith("live_notified")
-                               || currentStatus == "upcoming";
+                    // Có thể là:
+                    // (A) Livestream (đã gửi thông báo lúc "live") vừa kết thúc -> chỉ mark terminal "video_sent", không re-notify.
+                    // (B) Video thường hoặc video đặt lịch/công chiếu (từng là "upcoming" hoặc "none") vừa phát hành -> GỬI THÔNG BÁO VIDEO!
+                    var wasLiveNotified = currentStatus.StartsWith("live_notified");
 
-                    if (wasLive)
+                    if (wasLiveNotified)
                     {
-                        // Livestream vừa kết thúc → đánh terminal, KHÔNG gửi "video mới"
+                        // Livestream thực sự vừa kết thúc → đánh terminal, KHÔNG gửi lại thông báo "video mới"
                         _liveStates[videoId] = "video_sent";
                         liveChanged = true;
                         _logger.LogInformation(
                             "Live ended (was {Status}) → video_sent, no re-notify [{Channel}] — {VideoId}",
                             currentStatus, channelId, videoId);
                     }
-                    else if (lastVideoId != videoId && !_liveStates.ContainsKey(videoId))
+                    else if (lastVideoId != videoId && (currentStatus == "none" || currentStatus == "upcoming"))
                     {
-                        // ✅ FIX: Chỉ gửi thông báo khi video CHƯA TỪNG XUẤT HIỆN trong _liveStates.
-                        // Guard "!_liveStates.ContainsKey(videoId)" ngăn việc gửi lại cho video
-                        // đã biết dù status là "none" (video cũ bị bỏ sót trong cleanup).
+                        // Video mới chưa được gửi thông báo (kể cả video thường hoặc video đặt lịch "upcoming" vừa ra mắt)
+                        // Gửi thông báo ngay!
                         await _discord.SendVideoNotificationAsync(video);
                         _botState.LastVideoIds[channelId] = videoId;
                         stateChanged = true;
                         _liveStates[videoId] = "video_sent";
                         liveChanged = true;
-                        _logger.LogInformation("VIDEO notification sent [{Channel}] — {VideoId}", channelId, videoId);
+                        _logger.LogInformation("VIDEO notification sent [{Channel}] — {VideoId} (was {OldStatus})", channelId, videoId, currentStatus);
                         break; // Chỉ 1 video mới nhất mỗi channel mỗi lần check
                     }
-                    else if (lastVideoId != videoId && _liveStates.GetValueOrDefault(videoId) == "none")
+                    else if (lastVideoId == videoId)
                     {
-                        // Video đã biết (có trong _liveStates) nhưng status là "none" — đánh terminal
-                        // để tránh xử lý lại trong các tick tiếp theo.
                         _liveStates[videoId] = "video_sent";
                         liveChanged = true;
-                        _logger.LogDebug("Mark stale 'none' → video_sent in check loop — {VideoId}", videoId);
                     }
                     else
                     {

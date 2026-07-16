@@ -12,12 +12,12 @@ $VPS_IP      = if ($env:VPS_IP) { $env:VPS_IP } else { "103.77.243.86" }
 
 $REPO = "D:\source code\YouTubeDiscordBot"
 $COMMIT_MSG = @'
-fix: resolve NoneType crash in tiktok_check and force container recreation on deploy
+fix: resolve YouTube missing notifications for scheduled videos/premieres and stale cache states
 
 Bug Fixes & Hardening:
-- tiktok_check.py: handle NoneType, KeyError, and AttributeError responses when checking live status to prevent crashes and exit code 1 spam.
-- TikTokCheckerBackgroundService: catch temporary network/timeout errors specifically without logging full stack traces.
-- deploy.ps1: add --force-recreate to docker compose up so new code updates are guaranteed to apply on the VPS container during deployment.
+- YouTubeCheckerBackgroundService: fix transition check where `wasLive` included `currentStatus == "upcoming"`, causing scheduled videos and premieres to be marked `video_sent` without notifications upon release.
+- YouTubeCheckerBackgroundService: fix stale `none` status checking so cached/stale non-live videos trigger `SendVideoNotificationAsync` and update `LastVideoIds` properly.
+- YouTubeCheckerBackgroundService: prevent double notification and keep proper multi-channel video tracking during startup and periodic polling loops.
 '@
 
 Set-Location $REPO
