@@ -12,11 +12,12 @@ $VPS_IP      = if ($env:VPS_IP) { $env:VPS_IP } else { "103.77.243.86" }
 
 $REPO = "D:\source code\YouTubeDiscordBot"
 $COMMIT_MSG = @'
-fix: resolve YouTube missing notifications for scheduled videos/premieres and stale cache states
+fix: resolve YouTube missing notifications and safeguard LastVideoIds regression
 
 Bug Fixes & Hardening:
 - YouTubeCheckerBackgroundService: fix transition check where `wasLive` included `currentStatus == "upcoming"`, causing scheduled videos and premieres to be marked `video_sent` without notifications upon release.
 - YouTubeCheckerBackgroundService: fix stale `none` status checking so cached/stale non-live videos trigger `SendVideoNotificationAsync` and update `LastVideoIds` properly.
+- YouTubeCheckerBackgroundService: prevent LastVideoIds pointer from regressing backwards when processing older unnotified videos during periodic checks.
 - YouTubeCheckerBackgroundService: prevent double notification and keep proper multi-channel video tracking during startup and periodic polling loops.
 '@
 

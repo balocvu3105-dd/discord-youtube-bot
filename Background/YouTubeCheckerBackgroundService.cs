@@ -302,8 +302,16 @@ public class YouTubeCheckerBackgroundService : BackgroundService
                         // Video mới chưa được gửi thông báo (kể cả video thường hoặc video đặt lịch "upcoming" vừa ra mắt)
                         // Gửi thông báo ngay!
                         await _discord.SendVideoNotificationAsync(video);
-                        _botState.LastVideoIds[channelId] = videoId;
-                        stateChanged = true;
+
+                        // Cập nhật LastVideoIds cho kênh, đảm bảo KHÔNG lùi con trỏ về video cũ hơn nếu LastVideoId hiện tại đã ở video mới hơn (index 0)
+                        var lastIndex = !string.IsNullOrEmpty(lastVideoId) ? videoIds.IndexOf(lastVideoId) : -1;
+                        var currentIndex = videoIds.IndexOf(videoId);
+                        if (lastIndex == -1 || currentIndex <= lastIndex)
+                        {
+                            _botState.LastVideoIds[channelId] = videoId;
+                            stateChanged = true;
+                        }
+
                         _liveStates[videoId] = "video_sent";
                         liveChanged = true;
                         _logger.LogInformation("VIDEO notification sent [{Channel}] — {VideoId} (was {OldStatus})", channelId, videoId, currentStatus);
