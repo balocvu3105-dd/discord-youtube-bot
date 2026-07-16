@@ -47,11 +47,12 @@ async def _check(username: str):
         err_type = type(e).__name__
         err_msg = str(e).lower()
 
-        # Lỗi xác định user offline thật → OFFLINE
+        # Lỗi xác định user offline thật hoặc phản hồi rỗng từ API (NoneType / KeyError / AttributeError) → OFFLINE
         if any(kw in err_msg for kw in [
             "user_not_found", "not found", "not capable",
-            "offline", "not live", "not broadcasting"
-        ]):
+            "offline", "not live", "not broadcasting",
+            "'nonetype'", "nonetype"
+        ]) or err_type in ("TypeError", "AttributeError", "KeyError", "IndexError"):
             print("OFFLINE")
         else:
             # Lỗi mạng / timeout / unknown → exit(1) để C# coi là lỗi tạm thời,

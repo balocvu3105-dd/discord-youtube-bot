@@ -125,6 +125,10 @@ public class TikTokCheckerBackgroundService : BackgroundService
                         "Startup sync: @{Username} — isLive={IsLive}, state OK", username, isLive);
                 }
             }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("tiktok_check.py exited with code 1"))
+            {
+                _logger.LogWarning("Startup sync TikTok tạm thời gián đoạn cho @{Username} ({Reason}) — giữ state cũ", username, ex.Message);
+            }
             catch (Exception ex)
             {
                 // Lỗi check TikTok khi startup → giữ nguyên state hiện tại, tiếp tục chạy.
@@ -149,6 +153,11 @@ public class TikTokCheckerBackgroundService : BackgroundService
             try
             {
                 isLive = await _tiktok.IsLiveAsync(username);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("tiktok_check.py exited with code 1"))
+            {
+                _logger.LogWarning("TikTok check tạm thời gián đoạn cho @{Username} ({Reason}) — bỏ qua lần này", username, ex.Message);
+                continue;
             }
             catch (Exception ex)
             {

@@ -12,13 +12,12 @@ $VPS_IP      = if ($env:VPS_IP) { $env:VPS_IP } else { "103.77.243.86" }
 
 $REPO = "D:\source code\YouTubeDiscordBot"
 $COMMIT_MSG = @'
-chore: security hardening across livestream services and deployment script
+fix: resolve NoneType crash in tiktok_check and force container recreation on deploy
 
-Security Hardening & Optimization:
-- TikTokService: use ProcessStartInfo.ArgumentList instead of string concatenation to prevent Argument Injection.
-- KickService & FacebookLiveService: apply Uri.EscapeDataString to slugs/usernames to prevent Path Traversal and URL parsing errors.
-- deploy.ps1: support environment variable overrides ($env:VPS_USER, $env:VPS_IP) to avoid hardcoding server details.
-- README.md: document multi-platform livestream tracking features and security defensive coding practices.
+Bug Fixes & Hardening:
+- tiktok_check.py: handle NoneType, KeyError, and AttributeError responses when checking live status to prevent crashes and exit code 1 spam.
+- TikTokCheckerBackgroundService: catch temporary network/timeout errors specifically without logging full stack traces.
+- deploy.ps1: add --force-recreate to docker compose up so new code updates are guaranteed to apply on the VPS container during deployment.
 '@
 
 Set-Location $REPO
@@ -74,7 +73,7 @@ else
     echo '  [SKIP] TikTok config da co san'
 fi
 
-git stash && git pull origin main && docker compose up --build -d && echo '=== Deploy OK ==='
+git stash && git pull origin main && docker compose up --build --force-recreate -d && echo '=== Deploy OK ==='
 '@
 
 ssh "${VPS_USER}@${VPS_IP}" $VPS_COMMANDS
