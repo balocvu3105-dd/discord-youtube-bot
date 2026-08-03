@@ -36,3 +36,8 @@ promo_snapshot.json
 
 # Docker
 .dockerignore
+
+vps_*.txt
+
+*.bat
+*.ps1

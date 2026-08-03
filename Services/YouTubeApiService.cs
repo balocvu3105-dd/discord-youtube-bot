@@ -105,6 +105,11 @@ public class YouTubeApiService : IYouTubeApiService
                 _config.CheckIntervalSeconds);
             return [];
         }
+        catch (Google.GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogDebug("Playlist cho channel {ChannelId} không tìm thấy (HTTP 404, có thể channel chưa có video).", channelId);
+            return [];
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "GetLatestVideoIdsAsync thất bại — channelId={ChannelId}", channelId);
