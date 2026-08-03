@@ -41,3 +41,5 @@ vps_*.txt
 
 *.bat
 *.ps1
+
+data/
